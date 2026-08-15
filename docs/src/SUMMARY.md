@@ -228,5 +228,6 @@
   - [Using Debuggers](./development/debuggers.md)
   - [Performance](./performance.md)
   - [Glossary](./development/glossary.md)
+  - [Dozed Surface Model](./development/dozed-surface-model.md)
 - [Release Notes](./development/release-notes.md)
 - [Debugging Crashes](./development/debugging-crashes.md)

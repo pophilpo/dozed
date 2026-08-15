@@ -108,6 +108,8 @@ pub enum SidebarEvent {
 }
 
 pub trait Sidebar: Focusable + Render + EventEmitter<SidebarEvent> + Sized {
+    const SURFACE_ROLE: crate::SurfaceRole = crate::SurfaceRole::PersistentPanel;
+
     fn width(&self, cx: &App) -> Pixels;
     fn set_width(&mut self, width: Option<Pixels>, cx: &mut Context<Self>);
     fn has_notifications(&self, cx: &App) -> bool;
@@ -135,6 +137,7 @@ pub trait Sidebar: Focusable + Render + EventEmitter<SidebarEvent> + Sized {
 }
 
 pub trait SidebarHandle: 'static + Send + Sync {
+    fn surface_role(&self) -> crate::SurfaceRole;
     fn width(&self, cx: &App) -> Pixels;
     fn set_width(&self, width: Option<Pixels>, cx: &mut App);
     fn focus_handle(&self, cx: &App) -> FocusHandle;
@@ -160,6 +163,10 @@ impl Render for DraggedSidebar {
 }
 
 impl<T: Sidebar> SidebarHandle for Entity<T> {
+    fn surface_role(&self) -> crate::SurfaceRole {
+        T::SURFACE_ROLE
+    }
+
     fn width(&self, cx: &App) -> Pixels {
         self.read(cx).width(cx)
     }

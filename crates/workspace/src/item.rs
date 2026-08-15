@@ -475,6 +475,7 @@ where
 }
 
 pub trait ItemHandle: 'static + Send {
+    fn surface_role(&self) -> crate::SurfaceRole;
     fn item_focus_handle(&self, cx: &App) -> FocusHandle;
     fn subscribe_to_item_events(
         &self,
@@ -608,6 +609,10 @@ impl dyn ItemHandle {
 }
 
 impl<T: Item> ItemHandle for Entity<T> {
+    fn surface_role(&self) -> crate::SurfaceRole {
+        crate::SurfaceRole::Buffer
+    }
+
     fn subscribe_to_item_events(
         &self,
         window: &mut Window,

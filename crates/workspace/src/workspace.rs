@@ -21,6 +21,7 @@ pub mod shared_screen;
 pub use shared_screen::SharedScreen;
 pub mod focus_follows_mouse;
 mod status_bar;
+mod surface;
 pub mod tasks;
 mod theme_preview;
 mod toast_layer;
@@ -41,6 +42,7 @@ pub use path_list::{PathList, SerializedPathList};
 pub use remote::{
     RemoteConnectionIdentity, remote_connection_identity, same_remote_connection_identity,
 };
+pub use surface::SurfaceRole;
 pub use toast_layer::{ToastAction, ToastLayer, ToastView};
 
 use anyhow::{Context as _, Result, anyhow};
@@ -11788,6 +11790,20 @@ mod tests {
     }
 
     #[gpui::test]
+    fn test_default_surface_roles(cx: &mut TestAppContext) {
+        init_test(cx);
+
+        let item = cx.new(TestItem::new);
+        assert_eq!(ItemHandle::surface_role(&item), SurfaceRole::Buffer);
+
+        let panel = cx.new(|cx| TestPanel::new(DockPosition::Left, 100, cx));
+        assert_eq!(
+            PanelHandle::surface_role(&panel),
+            SurfaceRole::PersistentPanel
+        );
+    }
+
+    #[gpui::test]
     async fn test_tab_disambiguation(cx: &mut TestAppContext) {
         init_test(cx);
 
@@ -15008,6 +15024,27 @@ mod tests {
         ) -> impl IntoElement {
             div().track_focus(&self.0)
         }
+    }
+
+    #[gpui::test]
+    async fn test_modal_surface_role(cx: &mut gpui::TestAppContext) {
+        init_test(cx);
+
+        let fs = FakeFs::new(cx.executor());
+        let project = Project::test(fs, [], cx).await;
+        let (workspace, cx) =
+            cx.add_window_view(|window, cx| Workspace::test_new(project, window, cx));
+
+        workspace.update_in(cx, |workspace, window, cx| {
+            workspace.toggle_modal(window, cx, TestModal::new);
+        });
+
+        assert_eq!(
+            workspace.read_with(cx, |workspace, cx| {
+                workspace.modal_layer.read(cx).active_surface_role()
+            }),
+            Some(SurfaceRole::Transient)
+        );
     }
 
     // Registers its focus handle as a reopenable picker on construction, like a real

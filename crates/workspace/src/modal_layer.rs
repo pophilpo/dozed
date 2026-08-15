@@ -65,6 +65,7 @@ pub trait ModalView: ManagedView {
 }
 
 trait ModalViewHandle {
+    fn surface_role(&self) -> crate::SurfaceRole;
     fn on_before_dismiss(&mut self, window: &mut Window, cx: &mut App) -> DismissDecision;
     fn view(&self) -> AnyView;
     fn focus_handle(&self, cx: &App) -> FocusHandle;
@@ -74,6 +75,10 @@ trait ModalViewHandle {
 }
 
 impl<V: ModalView> ModalViewHandle for Entity<V> {
+    fn surface_role(&self) -> crate::SurfaceRole {
+        crate::SurfaceRole::Transient
+    }
+
     fn on_before_dismiss(&mut self, window: &mut Window, cx: &mut App) -> DismissDecision {
         self.update(cx, |this, cx| this.on_before_dismiss(window, cx))
     }
@@ -278,6 +283,12 @@ impl ModalLayer {
 
     pub fn has_active_modal(&self) -> bool {
         self.active_modal.is_some()
+    }
+
+    pub fn active_surface_role(&self) -> Option<crate::SurfaceRole> {
+        self.active_modal
+            .as_ref()
+            .map(|active_modal| active_modal.modal.surface_role())
     }
 }
 

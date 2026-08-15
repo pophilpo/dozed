@@ -346,6 +346,8 @@ impl ProjectSidebar {
 }
 
 impl Sidebar for ProjectSidebar {
+    const SURFACE_ROLE: workspace::SurfaceRole = workspace::SurfaceRole::Transient;
+
     fn width(&self, _cx: &App) -> Pixels {
         self.width
     }
@@ -530,6 +532,14 @@ mod tests {
             cx.set_global(AppDatabase::test_new());
             theme_settings::init(theme::LoadThemes::JustBase, cx);
         });
+    }
+
+    #[test]
+    fn test_project_sidebar_surface_role() {
+        assert_eq!(
+            <ProjectSidebar as Sidebar>::SURFACE_ROLE,
+            workspace::SurfaceRole::Transient
+        );
     }
 
     #[gpui::test]

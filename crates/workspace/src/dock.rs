@@ -104,6 +104,7 @@ pub trait Panel: Focusable + EventEmitter<PanelEvent> + Render + Sized {
 }
 
 pub trait PanelHandle: Send + Sync {
+    fn surface_role(&self) -> crate::SurfaceRole;
     fn panel_id(&self) -> EntityId;
     fn persistent_name(&self) -> &'static str;
     fn panel_key(&self) -> &'static str;
@@ -155,6 +156,10 @@ impl<T> PanelHandle for Entity<T>
 where
     T: Panel,
 {
+    fn surface_role(&self) -> crate::SurfaceRole {
+        crate::SurfaceRole::PersistentPanel
+    }
+
     fn panel_id(&self) -> EntityId {
         Entity::entity_id(self)
     }
