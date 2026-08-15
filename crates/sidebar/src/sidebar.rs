@@ -1,4 +1,7 @@
+mod project_sidebar;
 mod thread_switcher;
+
+pub use project_sidebar::ProjectSidebar;
 
 use acp_thread::ThreadStatus;
 use action_log::DiffStats;
@@ -63,9 +66,9 @@ use unicode_segmentation::UnicodeSegmentation as _;
 use util::ResultExt as _;
 use util::path_list::PathList;
 use workspace::{
-    CloseWindow, FocusWorkspaceSidebar, MultiWorkspace, MultiWorkspaceEvent, NextProject,
-    NextThread, Open, OpenMode, PreviousProject, PreviousThread, ProjectGroupKey, RemovalIntent,
-    SaveIntent, Sidebar as WorkspaceSidebar, SidebarSide, Toast, ToggleWorkspaceSidebar, Workspace,
+    CloseWindow, FocusWorkspaceSidebar, MultiWorkspace, MultiWorkspaceEvent, NextProject, Open,
+    OpenMode, PreviousProject, ProjectGroupKey, RemovalIntent, SaveIntent,
+    Sidebar as WorkspaceSidebar, SidebarSide, Toast, ToggleWorkspaceSidebar, Workspace,
     notifications::NotificationId, sidebar_side_context_menu,
 };
 
@@ -90,6 +93,10 @@ gpui::actions!(
         NewThreadInGroup,
         /// Toggles between the thread list and the thread history.
         ToggleThreadHistory,
+        /// Activates the next thread in sidebar order.
+        NextThread,
+        /// Activates the previous thread in sidebar order.
+        PreviousThread,
     ]
 );
 
@@ -689,7 +696,7 @@ fn apply_worktree_label_mode(
 /// an SSH connection. Suitable for passing to
 /// [`MultiWorkspace::find_or_create_workspace`] as the `connect_remote`
 /// argument.
-fn connect_remote(
+pub(crate) fn connect_remote(
     modal_workspace: Entity<Workspace>,
     connection_options: RemoteConnectionOptions,
     window: &mut Window,
@@ -7678,10 +7685,6 @@ impl WorkspaceSidebar for Sidebar {
         !self.contents.notified_threads.is_empty() || !self.contents.notified_terminals.is_empty()
     }
 
-    fn is_threads_list_view_active(&self) -> bool {
-        matches!(self.view, SidebarView::ThreadList)
-    }
-
     fn side(&self, cx: &App) -> SidebarSide {
         AgentSettings::get_global(cx).sidebar_side()
     }
@@ -7691,21 +7694,8 @@ impl WorkspaceSidebar for Sidebar {
         cx.notify();
     }
 
-    fn toggle_thread_switcher(
-        &mut self,
-        select_last: bool,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        self.toggle_thread_switcher_impl(select_last, window, cx);
-    }
-
     fn cycle_project(&mut self, forward: bool, window: &mut Window, cx: &mut Context<Self>) {
         self.cycle_project_impl(forward, window, cx);
-    }
-
-    fn cycle_thread(&mut self, forward: bool, window: &mut Window, cx: &mut Context<Self>) {
-        self.cycle_thread_impl(forward, window, cx);
     }
 
     fn serialized_state(&self, _cx: &App) -> Option<String> {

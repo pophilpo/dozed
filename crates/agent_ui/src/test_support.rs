@@ -159,14 +159,12 @@ pub async fn record_zed_created_worktree(
 
 pub struct TestWorkspaceSidebar {
     focus_handle: FocusHandle,
-    threads_list_active: bool,
 }
 
 impl TestWorkspaceSidebar {
-    fn new(threads_list_active: bool, cx: &mut Context<Self>) -> Self {
+    fn new(cx: &mut Context<Self>) -> Self {
         Self {
             focus_handle: cx.focus_handle(),
-            threads_list_active,
         }
     }
 }
@@ -193,10 +191,6 @@ impl WorkspaceSidebar for TestWorkspaceSidebar {
     fn side(&self, _cx: &App) -> SidebarSide {
         SidebarSide::Left
     }
-
-    fn is_threads_list_view_active(&self) -> bool {
-        self.threads_list_active
-    }
 }
 
 impl Render for TestWorkspaceSidebar {
@@ -205,16 +199,13 @@ impl Render for TestWorkspaceSidebar {
     }
 }
 
-pub fn register_test_sidebar(
-    threads_list_active: bool,
-    cx: &mut VisualTestContext,
-) -> Entity<TestWorkspaceSidebar> {
+pub fn register_test_sidebar(cx: &mut VisualTestContext) -> Entity<TestWorkspaceSidebar> {
     cx.update(|window, cx| {
         let multi_workspace = window
             .root::<MultiWorkspace>()
             .flatten()
             .expect("test window should have a MultiWorkspace root");
-        let sidebar = cx.new(|cx| TestWorkspaceSidebar::new(threads_list_active, cx));
+        let sidebar = cx.new(TestWorkspaceSidebar::new);
         multi_workspace.update(cx, |multi_workspace, cx| {
             multi_workspace.register_sidebar(sidebar.clone(), cx);
         });

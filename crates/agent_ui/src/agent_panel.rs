@@ -2856,10 +2856,6 @@ impl AgentPanel {
 
         if let Some(multi_workspace) = window.root::<MultiWorkspace>().flatten() {
             let multi_workspace = multi_workspace.read(cx);
-            if multi_workspace.sidebar_open() && multi_workspace.is_threads_list_view_active(cx) {
-                return true;
-            }
-
             let Some(workspace) = self.workspace.upgrade() else {
                 return false;
             };
@@ -9222,12 +9218,11 @@ mod tests {
     async fn setup_visible_panel(
         cx: &mut TestAppContext,
     ) -> (Entity<AgentPanel>, VisualTestContext) {
-        setup_visible_panel_with_sidebar(cx, true).await
+        setup_visible_panel_with_workspace_sidebar(cx).await
     }
 
-    async fn setup_visible_panel_with_sidebar(
+    async fn setup_visible_panel_with_workspace_sidebar(
         cx: &mut TestAppContext,
-        threads_list_active: bool,
     ) -> (Entity<AgentPanel>, VisualTestContext) {
         init_test(cx);
         cx.update(|cx| {
@@ -9257,7 +9252,7 @@ mod tests {
             .unwrap();
 
         let mut cx = VisualTestContext::from_window(multi_workspace.into(), cx);
-        register_test_sidebar(threads_list_active, &mut cx);
+        register_test_sidebar(&mut cx);
 
         let panel = workspace.update_in(&mut cx, |workspace, window, cx| {
             let panel = cx.new(|cx| AgentPanel::new(workspace, window, cx));
@@ -10208,57 +10203,8 @@ mod tests {
     }
 
     #[gpui::test]
-    async fn test_terminal_bell_marks_without_popup_when_sidebar_open(cx: &mut TestAppContext) {
+    async fn test_terminal_bell_notifies_when_workspace_sidebar_open(cx: &mut TestAppContext) {
         let (panel, mut cx) = setup_visible_panel(cx).await;
-        let first_terminal_id = panel
-            .update_in(&mut cx, |panel, window, cx| {
-                panel.insert_test_terminal("Build", true, window, cx)
-            })
-            .expect("first test terminal should be inserted");
-        let second_terminal_id = panel
-            .update_in(&mut cx, |panel, window, cx| {
-                panel.insert_test_terminal("Server", true, window, cx)
-            })
-            .expect("second test terminal should be inserted");
-        cx.run_until_parked();
-
-        panel.read_with(&cx, |panel, _cx| {
-            assert_eq!(panel.active_terminal_id(), Some(second_terminal_id));
-        });
-        cx.update(|window, cx| {
-            let multi_workspace = window
-                .root::<MultiWorkspace>()
-                .flatten()
-                .expect("test window should have a MultiWorkspace root");
-            multi_workspace.update(cx, |multi_workspace, cx| {
-                multi_workspace.open_sidebar(cx);
-            });
-        });
-        cx.run_until_parked();
-
-        panel.update(&mut cx, |panel, cx| {
-            panel.emit_test_terminal_bell(first_terminal_id, cx);
-        });
-        cx.run_until_parked();
-
-        panel.read_with(&cx, |panel, cx| {
-            let first_terminal = panel
-                .terminals(cx)
-                .into_iter()
-                .find(|terminal| terminal.id == first_terminal_id)
-                .expect("first terminal should remain in the panel");
-            assert!(first_terminal.has_notification);
-        });
-        assert!(
-            cx.windows()
-                .iter()
-                .all(|window| window.downcast::<AgentNotification>().is_none())
-        );
-    }
-
-    #[gpui::test]
-    async fn test_terminal_bell_notifies_when_sidebar_history_open(cx: &mut TestAppContext) {
-        let (panel, mut cx) = setup_visible_panel_with_sidebar(cx, false).await;
         let first_terminal_id = panel
             .update_in(&mut cx, |panel, window, cx| {
                 panel.insert_test_terminal("Build", true, window, cx)
@@ -10301,11 +10247,13 @@ mod tests {
         cx.windows()
             .iter()
             .find_map(|window| window.downcast::<AgentNotification>())
-            .expect("terminal bell should notify when the sidebar thread list is hidden");
+            .expect("workspace sidebar should not suppress a hidden terminal notification");
     }
 
     #[gpui::test]
-    async fn test_terminal_notification_dismissed_when_sidebar_opens(cx: &mut TestAppContext) {
+    async fn test_terminal_notification_retained_when_workspace_sidebar_opens(
+        cx: &mut TestAppContext,
+    ) {
         let (panel, mut cx) = setup_visible_panel(cx).await;
         let first_terminal_id = panel
             .update_in(&mut cx, |panel, window, cx| {
@@ -10351,11 +10299,10 @@ mod tests {
                 .expect("first terminal should remain in the panel");
             assert!(first_terminal.has_notification);
         });
-        assert!(
-            cx.windows()
-                .iter()
-                .all(|window| window.downcast::<AgentNotification>().is_none())
-        );
+        cx.windows()
+            .iter()
+            .find_map(|window| window.downcast::<AgentNotification>())
+            .expect("workspace sidebar should not dismiss a hidden terminal notification");
     }
 
     #[gpui::test]

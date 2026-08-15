@@ -800,14 +800,7 @@ impl TitleBar {
             .map(|mw| mw.read(cx).sidebar_open())
             .unwrap_or(false);
 
-        let is_threads_list_view_active = self
-            .multi_workspace
-            .as_ref()
-            .and_then(|mw| mw.upgrade())
-            .map(|mw| mw.read(cx).is_threads_list_view_active(cx))
-            .unwrap_or(false);
-
-        if is_sidebar_open && is_threads_list_view_active {
+        if is_sidebar_open {
             return self
                 .render_recent_projects_popover(display_name, is_project_selected, cx)
                 .into_any_element();
