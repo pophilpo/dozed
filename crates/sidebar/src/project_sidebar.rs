@@ -146,19 +146,12 @@ impl ProjectSidebar {
         if let Some(key) = key
             && self.groups(cx).iter().any(|group| group.key == key)
         {
-            self.activate_or_open_group(key, window, cx);
+            self.activate_or_open_group(key, true, window, cx);
         }
     }
 
     fn cancel(&mut self, _: &Cancel, window: &mut Window, cx: &mut Context<Self>) {
-        if let Some(multi_workspace) = self.multi_workspace.upgrade() {
-            window.defer(cx, move |window, cx| {
-                multi_workspace.update(cx, |multi_workspace, cx| {
-                    multi_workspace.close_sidebar(window, cx);
-                    multi_workspace.focus_active_workspace(window, cx);
-                });
-            });
-        }
+        self.dismiss(window, cx);
     }
 
     fn labels_for_groups(groups: &[ProjectGroup]) -> Vec<SharedString> {
@@ -195,6 +188,7 @@ impl ProjectSidebar {
     fn activate_or_open_group(
         &mut self,
         key: ProjectGroupKey,
+        dismiss_after_activation: bool,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
@@ -207,6 +201,9 @@ impl ProjectSidebar {
                 multi_workspace.activate(workspace, None, window, cx);
                 multi_workspace.retain_active_workspace(cx);
             });
+            if dismiss_after_activation {
+                self.dismiss(window, cx);
+            }
             return;
         }
 
@@ -232,9 +229,26 @@ impl ProjectSidebar {
             let result = task.await;
             remote_connection::dismiss_connection_modal(&modal_workspace, cx);
             result?;
+            if dismiss_after_activation {
+                multi_workspace.update_in(cx, |multi_workspace, window, cx| {
+                    multi_workspace.close_sidebar(window, cx);
+                    multi_workspace.focus_active_workspace(window, cx);
+                })?;
+            }
             anyhow::Ok(())
         })
         .detach_and_log_err(cx);
+    }
+
+    fn dismiss(&self, window: &mut Window, cx: &mut Context<Self>) {
+        if let Some(multi_workspace) = self.multi_workspace.upgrade() {
+            window.defer(cx, move |window, cx| {
+                multi_workspace.update(cx, |multi_workspace, cx| {
+                    multi_workspace.close_sidebar(window, cx);
+                    multi_workspace.focus_active_workspace(window, cx);
+                });
+            });
+        }
     }
 
     fn render_header(&self, window: &Window, cx: &mut Context<Self>) -> impl IntoElement {
@@ -327,7 +341,7 @@ impl ProjectSidebar {
         let Some(group) = groups.get(next_index) else {
             return;
         };
-        self.activate_or_open_group(group.key.clone(), window, cx);
+        self.activate_or_open_group(group.key.clone(), false, window, cx);
     }
 }
 
@@ -486,7 +500,12 @@ impl Render for ProjectSidebar {
                                 )
                                 .child(Label::new(label).truncate())
                                 .on_click(cx.listener(move |this, _, window, cx| {
-                                    this.activate_or_open_group(group.key.clone(), window, cx);
+                                    this.activate_or_open_group(
+                                        group.key.clone(),
+                                        true,
+                                        window,
+                                        cx,
+                                    );
                                 }))
                         },
                     )),
@@ -568,6 +587,17 @@ mod tests {
                 multi_workspace.project_group_key_for_workspace(multi_workspace.workspace(), cx),
                 key_a,
                 "confirming should activate the selected project's workspace",
+            );
+            assert!(
+                !multi_workspace.sidebar_open(),
+                "confirming should close the project picker",
+            );
+        });
+        multi_workspace.update_in(cx, |multi_workspace, window, cx| {
+            let pane = multi_workspace.workspace().read(cx).active_pane().clone();
+            assert!(
+                pane.read(cx).focus_handle(cx).contains_focused(window, cx),
+                "confirming should focus the selected workspace",
             );
         });
     }

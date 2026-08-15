@@ -3932,6 +3932,54 @@ mod tests {
     }
 
     #[gpui::test]
+    async fn test_open_project_opens_and_focuses_project_panel(cx: &mut TestAppContext) {
+        let app_state = init_test(cx);
+        app_state
+            .fs
+            .as_fake()
+            .insert_tree(path!("/project"), json!({ "file.txt": "" }))
+            .await;
+
+        cx.update(|cx| {
+            open_new(
+                OpenOptions::default(),
+                app_state,
+                cx,
+                |_workspace, _window, _cx| {},
+            )
+        })
+        .await
+        .unwrap();
+        let window = cx.update(|cx| cx.windows()[0].downcast::<MultiWorkspace>().unwrap());
+
+        window
+            .update(cx, |multi_workspace, window, cx| {
+                multi_workspace.open_project(vec![PathBuf::from(path!("/project"))], window, cx)
+            })
+            .unwrap()
+            .await
+            .unwrap();
+        cx.run_until_parked();
+
+        window
+            .update(cx, |multi_workspace, window, cx| {
+                let workspace = multi_workspace.workspace().read(cx);
+                assert_eq!(workspace.items(cx).count(), 0);
+                let (dock, panel) = workspace
+                    .all_docks()
+                    .into_iter()
+                    .find_map(|dock| {
+                        let panel = dock.read(cx).panel::<ProjectPanel>()?;
+                        Some((dock, panel))
+                    })
+                    .expect("project panel should be loaded");
+                assert!(dock.read(cx).is_open());
+                assert!(panel.read(cx).focus_handle(cx).contains_focused(window, cx));
+            })
+            .unwrap();
+    }
+
+    #[gpui::test]
     async fn test_open_paths(cx: &mut TestAppContext) {
         let app_state = init_test(cx);
 

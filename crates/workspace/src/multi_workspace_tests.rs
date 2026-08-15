@@ -1,7 +1,9 @@
 use std::path::PathBuf;
 
 use super::*;
-use crate::item::test::TestItem;
+use crate::{
+    DockPosition, dock::test::TestPanel, item::test::TestItem, register_serializable_item,
+};
 use agent_settings::AgentSettings;
 use client::proto;
 use fs::{FakeFs, Fs};
@@ -1258,6 +1260,118 @@ async fn test_open_project_closes_empty_workspace_but_not_non_empty_ones(cx: &mu
         })
         .unwrap();
     assert!(workspace_a.read_with(cx, |workspace, _cx| workspace.session_id().is_some()),);
+
+    let reopened_workspace_a = window
+        .update(cx, |mw, window, cx| {
+            mw.open_project(vec![PathBuf::from(path!("/project_a"))], window, cx)
+        })
+        .unwrap()
+        .await
+        .unwrap();
+    assert_eq!(reopened_workspace_a, workspace_a);
+    assert_eq!(
+        workspace_a.read_with(cx, |workspace, cx| workspace.items(cx).count()),
+        1,
+        "an already loaded project should keep its buffer state"
+    );
+}
+
+#[gpui::test]
+async fn test_open_project_ignores_saved_workspace_state(cx: &mut TestAppContext) {
+    init_test(cx);
+    let app_state = cx.update(AppState::test);
+    let fs = app_state.fs.as_fake();
+    fs.insert_tree(path!("/project"), json!({ "file.txt": "" }))
+        .await;
+
+    cx.update(register_serializable_item::<TestItem>);
+
+    let initial_project = Project::test(app_state.fs.clone(), [], cx).await;
+    let initial_window =
+        cx.add_window(|window, cx| MultiWorkspace::test_new(initial_project, window, cx));
+    initial_window
+        .update(cx, |multi_workspace, _window, cx| {
+            multi_workspace.open_sidebar(cx)
+        })
+        .unwrap();
+
+    let saved_workspace = initial_window
+        .update(cx, |multi_workspace, window, cx| {
+            multi_workspace.open_project(vec![PathBuf::from(path!("/project"))], window, cx)
+        })
+        .unwrap()
+        .await
+        .unwrap();
+
+    let serialized_item =
+        cx.new(|cx| TestItem::new(cx).with_serialize(|| Some(Task::ready(Ok(())))));
+    let serialization_task = initial_window
+        .update(cx, |_, window, cx| {
+            saved_workspace.update(cx, |workspace, cx| {
+                workspace.centered_layout = true;
+                workspace.add_item_to_active_pane(
+                    Box::new(serialized_item),
+                    None,
+                    true,
+                    window,
+                    cx,
+                );
+                workspace.flush_serialization(window, cx)
+            })
+        })
+        .unwrap();
+    serialization_task.await;
+
+    let fresh_project = Project::test(app_state.fs.clone(), [], cx).await;
+    let fresh_window =
+        cx.add_window(|window, cx| MultiWorkspace::test_new(fresh_project, window, cx));
+    fresh_window
+        .update(cx, |multi_workspace, _window, cx| {
+            multi_workspace.open_sidebar(cx)
+        })
+        .unwrap();
+
+    let fresh_workspace = fresh_window
+        .update(cx, |multi_workspace, window, cx| {
+            multi_workspace.open_project(vec![PathBuf::from(path!("/project"))], window, cx)
+        })
+        .unwrap()
+        .await
+        .unwrap();
+
+    fresh_workspace.read_with(cx, |workspace, cx| {
+        assert!(!workspace.centered_layout);
+        assert_eq!(workspace.items(cx).count(), 0);
+    });
+}
+
+#[gpui::test]
+async fn test_empty_workspace_focuses_an_open_panel(cx: &mut TestAppContext) {
+    init_test(cx);
+    let fs = FakeFs::new(cx.executor());
+    let project = Project::test(fs, [], cx).await;
+    let (multi_workspace, cx) =
+        cx.add_window_view(|window, cx| MultiWorkspace::test_new(project, window, cx));
+    let workspace = multi_workspace.read_with(cx, |multi_workspace, _cx| {
+        multi_workspace.workspace().clone()
+    });
+    let panel = workspace.update_in(cx, |workspace, window, cx| {
+        let panel = cx.new(|cx| TestPanel::new(DockPosition::Left, 100, cx));
+        workspace.add_panel(panel.clone(), window, cx);
+        workspace.open_panel::<TestPanel>(window, cx);
+        panel
+    });
+
+    multi_workspace.update_in(cx, |multi_workspace, window, cx| {
+        let workspace = multi_workspace.workspace().clone();
+        workspace.update(cx, |workspace, cx| {
+            assert!(workspace.focus_panel_by_persistent_name("TestPanel", window, cx));
+        });
+    });
+
+    multi_workspace.update_in(cx, |_multi_workspace, window, cx| {
+        assert!(panel.read(cx).focus_handle(cx).is_focused(window));
+    });
 }
 
 #[gpui::test]

@@ -1378,7 +1378,8 @@ impl MultiWorkspace {
     pub fn focus_active_workspace(&self, window: &mut Window, cx: &mut App) {
         // If a dock panel is zoomed, focus it instead of the center pane.
         // Otherwise, focusing the center pane triggers dismiss_zoomed_items_to_reveal
-        // which closes the zoomed dock.
+        // which closes the zoomed dock. An empty project lands in its open panel
+        // rather than leaving focus in an empty center pane.
         let focus_handle = {
             let workspace = self.workspace().read(cx);
             let mut target = None;
@@ -1386,9 +1387,13 @@ impl MultiWorkspace {
                 let dock = dock.read(cx);
                 if dock.is_open() {
                     if let Some(panel) = dock.active_panel() {
-                        if panel.is_zoomed(window, cx) {
+                        if panel.is_zoomed(window, cx)
+                            || (workspace.active_item(cx).is_none() && target.is_none())
+                        {
                             target = Some(panel.activation_focus_handle(cx));
-                            break;
+                            if panel.is_zoomed(window, cx) {
+                                break;
+                            }
                         }
                     }
                 }
@@ -1818,6 +1823,14 @@ impl MultiWorkspace {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Task<Result<Entity<Workspace>>> {
+        let path_list = PathList::new(&paths);
+        if let Some(workspace) = self.workspace_for_paths(&path_list, None, cx) {
+            self.activate(workspace.clone(), None, window, cx);
+            return Task::ready(Ok(workspace));
+        }
+        let app_state = self.workspace().read(cx).app_state().clone();
+        let requesting_window = window.window_handle().downcast::<MultiWorkspace>();
+
         let empty_workspace = if self
             .workspace()
             .read(cx)
@@ -1844,18 +1857,19 @@ impl MultiWorkspace {
                 }
             }
 
-            let create_task = this.update_in(cx, |this, window, cx| {
-                this.find_or_create_local_workspace(
-                    PathList::new(&paths),
+            let create_task = cx.update(|_window, cx| {
+                Workspace::new_local_with_restore(
+                    paths,
+                    app_state,
+                    requesting_window,
                     None,
                     None,
                     OpenMode::Activate,
-                    None,
-                    window,
+                    false,
                     cx,
                 )
             })?;
-            let new_workspace = create_task.await?;
+            let new_workspace = create_task.await?.workspace;
 
             if let Some(empty_workspace) = empty_workspace
                 && empty_workspace != new_workspace

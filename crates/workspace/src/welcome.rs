@@ -314,7 +314,7 @@ impl WelcomePage {
                     self.workspace
                         .update(cx, |workspace, cx| {
                             workspace
-                                .open_workspace_for_paths(open_mode, paths, window, cx)
+                                .open_fresh_workspace_for_paths(open_mode, paths, window, cx)
                                 .detach_and_log_err(cx);
                         })
                         .log_err();
