@@ -7680,7 +7680,7 @@ impl Panel for ProjectPanel {
     }
 
     fn persistent_name() -> &'static str {
-        "Project Panel"
+        workspace::PROJECT_PANEL_PERSISTENT_NAME
     }
 
     fn panel_key() -> &'static str {

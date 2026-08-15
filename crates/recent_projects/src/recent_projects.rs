@@ -186,6 +186,39 @@ pub async fn get_recent_projects(
     }
 }
 
+async fn get_recent_git_projects(
+    fs: &dyn fs::Fs,
+    db: &WorkspaceDb,
+) -> anyhow::Result<Vec<RecentWorkspace>> {
+    let workspaces = db.recent_project_workspaces(fs).await?;
+    let mut git_workspaces = Vec::new();
+    for workspace in workspaces {
+        if !matches!(workspace.location, SerializedWorkspaceLocation::Local) {
+            continue;
+        }
+
+        if is_git_workspace(fs, &workspace).await {
+            git_workspaces.push(workspace);
+        }
+    }
+    Ok(git_workspaces)
+}
+
+async fn is_git_workspace(fs: &dyn fs::Fs, workspace: &RecentWorkspace) -> bool {
+    for path in workspace.paths.paths() {
+        if fs
+            .metadata(&path.join(".git"))
+            .await
+            .log_err()
+            .flatten()
+            .is_some()
+        {
+            return true;
+        }
+    }
+    false
+}
+
 pub async fn delete_recent_project(workspace_id: WorkspaceId, db: &WorkspaceDb) {
     let _ = db.delete_workspace_by_id(workspace_id).await;
 }
@@ -660,8 +693,7 @@ impl RecentProjects {
         let db = WorkspaceDb::global(cx);
         cx.spawn_in(window, async move |this, cx| {
             let Some(fs) = fs else { return };
-            let workspaces = db
-                .recent_project_workspaces(fs.as_ref())
+            let workspaces = get_recent_git_projects(fs.as_ref(), &db)
                 .await
                 .log_err()
                 .unwrap_or_default();
@@ -2115,7 +2147,7 @@ fn open_local_project(
             }
             if let Some(task) = workspace
                 .update_in(cx, |workspace, window, cx| {
-                    workspace.open_workspace_for_paths(OpenMode::NewWindow, paths, window, cx)
+                    workspace.open_fresh_workspace_for_paths(OpenMode::NewWindow, paths, window, cx)
                 })
                 .log_err()
             {
@@ -2168,7 +2200,7 @@ impl RecentProjectsDelegate {
                         return;
                     } else {
                         workspace
-                            .open_workspace_for_paths(OpenMode::NewWindow, paths, window, cx)
+                            .open_fresh_workspace_for_paths(OpenMode::NewWindow, paths, window, cx)
                             .detach_and_prompt_err(
                                 "Failed to open project",
                                 window,
@@ -2334,8 +2366,7 @@ impl RecentProjectsDelegate {
                     .await
                     .log_err()
                     .unwrap_or_default();
-                let workspaces = db
-                    .recent_project_workspaces(fs.as_ref())
+                let workspaces = get_recent_git_projects(fs.as_ref(), &db)
                     .await
                     .unwrap_or_default();
                 this.update_in(cx, move |picker, window, cx| {
@@ -2480,6 +2511,7 @@ impl RecentProjectsDelegate {
 
 #[cfg(test)]
 mod tests {
+    use fs::FakeFs;
     use gpui::{TestAppContext, UpdateGlobal, VisualTestContext};
 
     use serde_json::json;
@@ -2546,6 +2578,39 @@ mod tests {
 
     fn recent_workspaces() -> Vec<RecentWorkspace> {
         (0..RECENT_PROJECT_COUNT).map(recent_workspace).collect()
+    }
+
+    #[gpui::test]
+    async fn git_workspace_detection_accepts_directories_and_worktree_files(
+        cx: &mut TestAppContext,
+    ) {
+        let fs = FakeFs::new(cx.executor());
+        fs.insert_tree(
+            path!("/projects"),
+            json!({
+                "repository": { ".git": {} },
+                "worktree": { ".git": "gitdir: ../repository/.git/worktrees/worktree" },
+                "plain": {},
+            }),
+        )
+        .await;
+
+        let workspace_at = |index, path: &str| {
+            let paths = PathList::new(&[PathBuf::from(path)]);
+            RecentWorkspace {
+                workspace_id: WorkspaceId::from_i64(index),
+                location: SerializedWorkspaceLocation::Local,
+                paths: paths.clone(),
+                identity_paths: paths,
+                timestamp: Utc::now(),
+            }
+        };
+
+        assert!(
+            is_git_workspace(fs.as_ref(), &workspace_at(1, path!("/projects/repository"))).await
+        );
+        assert!(is_git_workspace(fs.as_ref(), &workspace_at(2, path!("/projects/worktree"))).await);
+        assert!(!is_git_workspace(fs.as_ref(), &workspace_at(3, path!("/projects/plain"))).await);
     }
 
     fn draw(cx: &mut VisualTestContext) {

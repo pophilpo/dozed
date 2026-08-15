@@ -2836,9 +2836,7 @@ impl ConversationView {
         };
 
         let multi_workspace = multi_workspace.read(cx);
-        multi_workspace.sidebar_open() && multi_workspace.is_threads_list_view_active(cx)
-            || multi_workspace.workspace() == &workspace
-                && self.is_visible_in_agent_panel(&workspace, cx)
+        multi_workspace.workspace() == &workspace && self.is_visible_in_agent_panel(&workspace, cx)
     }
 
     fn is_visible_in_agent_panel(&self, workspace: &Entity<Workspace>, cx: &Context<Self>) -> bool {
@@ -5073,7 +5071,7 @@ pub(crate) mod tests {
     }
 
     #[gpui::test]
-    async fn test_no_notification_when_sidebar_open_but_different_thread_focused(
+    async fn test_notification_when_workspace_sidebar_open_but_different_thread_focused(
         cx: &mut TestAppContext,
     ) {
         init_test(cx);
@@ -5096,7 +5094,7 @@ pub(crate) mod tests {
             .unwrap();
 
         let cx = &mut VisualTestContext::from_window(multi_workspace_handle.into(), cx);
-        register_test_sidebar(true, cx);
+        register_test_sidebar(cx);
 
         // Open the sidebar so that sidebar_open() returns true.
         multi_workspace_handle
@@ -5153,15 +5151,15 @@ pub(crate) mod tests {
         cx.run_until_parked();
 
         assert!(
-            !cx.windows()
+            cx.windows()
                 .iter()
                 .any(|window| window.downcast::<AgentNotification>().is_some()),
-            "Expected no notification when the sidebar is open, even if focused on another thread"
+            "Expected notification because the workspace sidebar does not make the thread visible"
         );
     }
 
     #[gpui::test]
-    async fn test_notification_when_sidebar_open_but_thread_list_hidden(cx: &mut TestAppContext) {
+    async fn test_notification_when_workspace_sidebar_open(cx: &mut TestAppContext) {
         init_test(cx);
 
         let fs = FakeFs::new(cx.executor());
@@ -5182,7 +5180,7 @@ pub(crate) mod tests {
             .unwrap();
 
         let cx = &mut VisualTestContext::from_window(multi_workspace_handle.into(), cx);
-        register_test_sidebar(false, cx);
+        register_test_sidebar(cx);
         multi_workspace_handle
             .update(cx, |mw, _window, cx| {
                 mw.open_sidebar(cx);
@@ -5229,12 +5227,12 @@ pub(crate) mod tests {
             cx.windows()
                 .iter()
                 .any(|window| window.downcast::<AgentNotification>().is_some()),
-            "Expected notification when the sidebar is open but the thread list is hidden"
+            "Expected notification when only the workspace sidebar is open"
         );
     }
 
     #[gpui::test]
-    async fn test_notification_dismissed_when_sidebar_opens(cx: &mut TestAppContext) {
+    async fn test_notification_retained_when_workspace_sidebar_opens(cx: &mut TestAppContext) {
         init_test(cx);
 
         let fs = FakeFs::new(cx.executor());
@@ -5255,7 +5253,7 @@ pub(crate) mod tests {
             .unwrap();
 
         let cx = &mut VisualTestContext::from_window(multi_workspace_handle.into(), cx);
-        register_test_sidebar(true, cx);
+        register_test_sidebar(cx);
 
         let thread_store = cx.update(|_window, cx| cx.new(|cx| ThreadStore::new(cx)));
         let connection_store =
@@ -5316,8 +5314,8 @@ pub(crate) mod tests {
                 .iter()
                 .filter(|window| window.downcast::<AgentNotification>().is_some())
                 .count(),
-            0,
-            "Notification should auto-dismiss when the sidebar opens and makes the thread visible"
+            1,
+            "Workspace sidebar should not dismiss a notification for a hidden thread"
         );
     }
 
