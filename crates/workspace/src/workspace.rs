@@ -8100,9 +8100,32 @@ impl Workspace {
     where
         B: FnOnce(&mut Window, &mut Context<V>) -> V,
     {
+        let fallback_focus_handle = self.surface_focus_fallback(window, cx).downgrade();
         self.modal_layer.update(cx, |modal_layer, cx| {
-            modal_layer.toggle_modal(window, cx, build)
+            modal_layer.toggle_modal(fallback_focus_handle, window, cx, build)
         })
+    }
+
+    pub(crate) fn surface_focus_fallback(&self, window: &Window, cx: &App) -> FocusHandle {
+        // Focusing the center would unzoom a dock panel, and an empty center has no
+        // useful target while an open panel is available.
+        let mut target = None;
+        for dock in self.all_docks() {
+            let dock = dock.read(cx);
+            if dock.is_open()
+                && let Some(panel) = dock.active_panel()
+            {
+                if panel.is_zoomed(window, cx)
+                    || (self.active_item(cx).is_none() && target.is_none())
+                {
+                    target = Some(panel.activation_focus_handle(cx));
+                    if panel.is_zoomed(window, cx) {
+                        break;
+                    }
+                }
+            }
+        }
+        target.unwrap_or_else(|| self.active_pane.focus_handle(cx))
     }
 
     pub fn hide_modal(&mut self, window: &mut Window, cx: &mut App) -> bool {
@@ -15045,6 +15068,36 @@ mod tests {
             }),
             Some(SurfaceRole::Transient)
         );
+    }
+
+    #[gpui::test]
+    async fn test_modal_uses_workspace_focus_fallback(cx: &mut gpui::TestAppContext) {
+        init_test(cx);
+
+        let fs = FakeFs::new(cx.executor());
+        let project = Project::test(fs, [], cx).await;
+        let (workspace, cx) =
+            cx.add_window_view(|window, cx| Workspace::test_new(project, window, cx));
+        let workspace_focus = workspace.read_with(cx, |workspace, cx| workspace.focus_handle(cx));
+        let previous_focus = cx.update(|window, cx| {
+            let previous_focus = cx.focus_handle();
+            window.focus(&previous_focus, cx);
+            previous_focus
+        });
+
+        workspace.update_in(cx, |workspace, window, cx| {
+            workspace.toggle_modal(window, cx, TestModal::new);
+        });
+        cx.run_until_parked();
+        drop(previous_focus);
+
+        workspace.update_in(cx, |workspace, window, cx| {
+            workspace.hide_modal(window, cx);
+        });
+
+        cx.update(|window, cx| {
+            assert!(workspace_focus.contains_focused(window, cx));
+        });
     }
 
     // Registers its focus handle as a reopenable picker on construction, like a real

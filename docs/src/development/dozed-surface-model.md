@@ -17,6 +17,8 @@ shape. Every surface has one role:
 - Mouse, Vim, and command-driven interaction follow the same lifecycle rules.
 - Closing a transient surface restores the previous valid focus. If that focus
   no longer exists, focus returns to the active workspace.
+- The surface container captures and restores focus. Its content requests
+  dismissal without choosing the next focus target.
 - A live project workspace keeps its buffers, pane layout, and persistent panel
   state. Transient surfaces are never part of restored workspace state.
 - An application window contains project workspaces and their surfaces. It is

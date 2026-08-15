@@ -232,7 +232,6 @@ impl ProjectSidebar {
             if dismiss_after_activation {
                 multi_workspace.update_in(cx, |multi_workspace, window, cx| {
                     multi_workspace.close_sidebar(window, cx);
-                    multi_workspace.focus_active_workspace(window, cx);
                 })?;
             }
             anyhow::Ok(())
@@ -245,7 +244,6 @@ impl ProjectSidebar {
             window.defer(cx, move |window, cx| {
                 multi_workspace.update(cx, |multi_workspace, cx| {
                     multi_workspace.close_sidebar(window, cx);
-                    multi_workspace.focus_active_workspace(window, cx);
                 });
             });
         }
@@ -522,6 +520,7 @@ mod tests {
     use gpui::TestAppContext;
     use serde_json::json;
     use settings::SettingsStore;
+    use workspace::dock::{DockPosition, test::TestPanel};
 
     use super::*;
 
@@ -613,18 +612,19 @@ mod tests {
     }
 
     #[gpui::test]
-    async fn test_cancel_closes_project_picker_and_focuses_workspace(cx: &mut TestAppContext) {
+    async fn test_cancel_closes_project_picker_and_restores_previous_focus(
+        cx: &mut TestAppContext,
+    ) {
         init_test(cx);
         let fs = FakeFs::new(cx.executor());
         let project = project::Project::test(fs, [], cx).await;
         let (multi_workspace, cx) =
             cx.add_window_view(|window, cx| MultiWorkspace::test_new(project, window, cx));
-        let workspace_focus = multi_workspace.read_with(cx, |multi_workspace, cx| {
-            let pane = multi_workspace.workspace().read(cx).active_pane().clone();
-            pane.read(cx).focus_handle(cx)
-        });
+        let panel = cx.new(|cx| TestPanel::new(DockPosition::Bottom, 100, cx));
+        let previous_focus = panel.read_with(cx, |panel, cx| panel.focus_handle(cx));
         multi_workspace.update_in(cx, |multi_workspace, window, cx| {
-            multi_workspace.focus_active_workspace(window, cx);
+            multi_workspace.add_panel(panel, window, cx);
+            multi_workspace.focus_panel::<TestPanel>(window, cx);
         });
 
         let multi_workspace_for_sidebar = multi_workspace.clone();
@@ -641,6 +641,46 @@ mod tests {
         cx.update(|window, _cx| {
             assert!(sidebar_focus.is_focused(window));
         });
+
+        cx.dispatch_action(Cancel);
+        cx.run_until_parked();
+
+        multi_workspace.read_with(cx, |multi_workspace, _cx| {
+            assert!(!multi_workspace.sidebar_open());
+        });
+        cx.update(|window, _cx| {
+            assert!(previous_focus.is_focused(window));
+        });
+    }
+
+    #[gpui::test]
+    async fn test_cancel_project_picker_uses_workspace_focus_fallback(cx: &mut TestAppContext) {
+        init_test(cx);
+        let fs = FakeFs::new(cx.executor());
+        let project = project::Project::test(fs, [], cx).await;
+        let (multi_workspace, cx) =
+            cx.add_window_view(|window, cx| MultiWorkspace::test_new(project, window, cx));
+        let workspace_focus = multi_workspace.read_with(cx, |multi_workspace, cx| {
+            let pane = multi_workspace.workspace().read(cx).active_pane().clone();
+            pane.read(cx).focus_handle(cx)
+        });
+        let previous_focus = cx.update(|window, cx| {
+            let previous_focus = cx.focus_handle();
+            window.focus(&previous_focus, cx);
+            previous_focus
+        });
+
+        let multi_workspace_for_sidebar = multi_workspace.clone();
+        let sidebar = cx.update(|window, cx| {
+            cx.new(|cx| ProjectSidebar::new(multi_workspace_for_sidebar, window, cx))
+        });
+        multi_workspace.update(cx, |multi_workspace, cx| {
+            multi_workspace.register_sidebar(sidebar, cx);
+        });
+        multi_workspace.update_in(cx, |multi_workspace, window, cx| {
+            multi_workspace.toggle_sidebar(window, cx);
+        });
+        drop(previous_focus);
 
         cx.dispatch_action(Cancel);
         cx.run_until_parked();
