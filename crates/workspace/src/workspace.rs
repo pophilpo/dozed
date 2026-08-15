@@ -760,7 +760,7 @@ pub fn prompt_for_open_path_and_open(
             if let Some(handle) = multi_workspace_handle {
                 if let Some(task) = handle
                     .update(cx, |multi_workspace, window, cx| {
-                        multi_workspace.open_project(paths, OpenMode::Activate, window, cx)
+                        multi_workspace.open_project(paths, window, cx)
                     })
                     .log_err()
                 {
@@ -10532,11 +10532,7 @@ pub fn open_paths(
                         .and_then(|window| window.downcast::<MultiWorkspace>())
                         .filter(|window| windows.contains(window))
                         .or_else(|| windows.into_iter().next());
-                    window.filter(|window| {
-                        window
-                            .read(cx)
-                            .is_ok_and(|mw| mw.multi_workspace_enabled(cx))
-                    })
+                    window
                 });
 
                 if let Some(window) = target_window {

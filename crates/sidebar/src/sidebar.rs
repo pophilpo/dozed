@@ -1994,9 +1994,6 @@ impl Sidebar {
         let Some(multi_workspace) = self.multi_workspace.upgrade() else {
             return;
         };
-        if !multi_workspace.read(cx).multi_workspace_enabled(cx) {
-            return;
-        }
 
         let had_notifications = self.has_notifications(cx);
         let previous_shapes: Vec<EntryShape> =

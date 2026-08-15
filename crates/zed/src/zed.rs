@@ -503,38 +503,6 @@ pub fn initialize_workspace(app_state: Arc<AppState>, cx: &mut App) {
 
         let window_handle = window.window_handle();
         let multi_workspace_handle = cx.entity();
-        cx.subscribe_in(
-            &multi_workspace_handle,
-            window,
-            |this, _multi_workspace, event: &workspace::MultiWorkspaceEvent, window, cx| {
-                let workspace::MultiWorkspaceEvent::ActiveWorkspaceChanged { source_workspace } =
-                    event
-                else {
-                    return;
-                };
-
-                let active_workspace = this.workspace().clone();
-                let source_workspace = source_workspace.clone();
-                active_workspace.update(cx, |workspace, cx| {
-                    if let Some(ref source) = source_workspace {
-                        if let Some(panel) = workspace.panel::<agent_ui::AgentPanel>(cx) {
-                            panel.update(cx, |panel, cx| {
-                                panel.initialize_from_source_workspace_if_needed(
-                                    source.clone(),
-                                    window,
-                                    cx,
-                                );
-                            });
-                        }
-                    }
-
-                    ensure_agent_panel_for_workspace(workspace, source_workspace, window, cx)
-                        .detach_and_log_err(cx);
-                });
-            },
-        )
-        .detach();
-
         cx.defer(move |cx| {
             window_handle
                 .update(cx, |_, window, cx| {
@@ -853,25 +821,11 @@ fn setup_or_teardown_ai_panel<P: Panel>(
 
 fn ensure_agent_panel_for_workspace(
     workspace: &mut Workspace,
-    source_workspace: Option<WeakEntity<Workspace>>,
     window: &mut Window,
     cx: &mut Context<Workspace>,
 ) -> Task<anyhow::Result<()>> {
-    let task = setup_or_teardown_ai_panel(workspace, window, cx, move |workspace, cx| {
+    setup_or_teardown_ai_panel(workspace, window, cx, move |workspace, cx| {
         agent_ui::AgentPanel::load(workspace, cx)
-    });
-
-    cx.spawn_in(window, async move |workspace, cx| {
-        task.await?;
-        workspace.update_in(cx, |workspace, window, cx| {
-            if let Some(source_workspace) = source_workspace.clone()
-                && let Some(panel) = workspace.panel::<agent_ui::AgentPanel>(cx)
-            {
-                panel.update(cx, |panel, cx| {
-                    panel.initialize_from_source_workspace_if_needed(source_workspace, window, cx);
-                });
-            }
-        })
     })
 }
 
@@ -881,13 +835,13 @@ async fn initialize_agent_panel(
 ) -> anyhow::Result<()> {
     workspace_handle
         .update_in(&mut cx, |workspace, window, cx| {
-            ensure_agent_panel_for_workspace(workspace, None, window, cx)
+            ensure_agent_panel_for_workspace(workspace, window, cx)
         })?
         .await?;
 
     workspace_handle.update_in(&mut cx, |workspace, window, cx| {
         cx.observe_global_in::<SettingsStore>(window, move |workspace, window, cx| {
-            ensure_agent_panel_for_workspace(workspace, None, window, cx).detach_and_log_err(cx);
+            ensure_agent_panel_for_workspace(workspace, window, cx).detach_and_log_err(cx);
         })
         .detach();
 
@@ -7206,7 +7160,7 @@ mod tests {
 
         window_a
             .update(cx, |multi_workspace, window, cx| {
-                multi_workspace.open_project(vec![dir2.into()], OpenMode::Activate, window, cx)
+                multi_workspace.open_project(vec![dir2.into()], window, cx)
             })
             .unwrap()
             .await
@@ -7416,7 +7370,7 @@ mod tests {
 
         window
             .update(cx, |multi_workspace, window, cx| {
-                multi_workspace.open_project(vec![dir2.into()], OpenMode::Activate, window, cx)
+                multi_workspace.open_project(vec![dir2.into()], window, cx)
             })
             .unwrap()
             .await
@@ -7559,7 +7513,7 @@ mod tests {
 
         window
             .update(cx, |mw, window, cx| {
-                mw.open_project(vec![path!("/root_b").into()], OpenMode::Add, window, cx)
+                mw.open_project(vec![path!("/root_b").into()], window, cx)
             })
             .unwrap()
             .await
@@ -7567,7 +7521,7 @@ mod tests {
 
         window
             .update(cx, |mw, window, cx| {
-                mw.open_project(vec![path!("/root_c").into()], OpenMode::Add, window, cx)
+                mw.open_project(vec![path!("/root_c").into()], window, cx)
             })
             .unwrap()
             .await

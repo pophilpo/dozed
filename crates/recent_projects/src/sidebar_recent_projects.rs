@@ -14,8 +14,8 @@ use settings::Settings;
 use ui::{ButtonLike, KeyBinding, ListItem, ListItemSpacing, Tooltip, prelude::*};
 use util::{ResultExt, paths::PathExt};
 use workspace::{
-    MultiWorkspace, OpenMode, OpenOptions, ProjectGroupKey, RecentWorkspace,
-    SerializedWorkspaceLocation, Workspace, WorkspaceDb, notifications::DetachAndPromptErr,
+    MultiWorkspace, OpenOptions, ProjectGroupKey, RecentWorkspace, SerializedWorkspaceLocation,
+    Workspace, WorkspaceDb, notifications::DetachAndPromptErr,
 };
 
 use zed_actions::OpenRemote;
@@ -240,7 +240,7 @@ impl PickerDelegate for SidebarRecentProjectsDelegate {
                     cx.defer(move |cx| {
                         if let Some(task) = handle
                             .update(cx, |multi_workspace, window, cx| {
-                                multi_workspace.open_project(paths, OpenMode::Activate, window, cx)
+                                multi_workspace.open_project(paths, window, cx)
                             })
                             .log_err()
                         {
