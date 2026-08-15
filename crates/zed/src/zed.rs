@@ -5532,6 +5532,117 @@ mod tests {
         })
     }
 
+    fn vim_bindings_for(
+        keystrokes: &[&str],
+        contexts: &[&str],
+        cx: &mut TestAppContext,
+    ) -> Vec<String> {
+        cx.update(|cx| {
+            let bindings = match settings::KeymapFile::load_asset_allow_partial_failure(
+                "keymaps/vim.json",
+                cx,
+            ) {
+                Ok(bindings) => bindings,
+                Err(error) => panic!("failed to load the Vim keymap: {error}"),
+            };
+            let keystrokes = keystrokes
+                .iter()
+                .map(|keystroke| match gpui::Keystroke::parse(keystroke) {
+                    Ok(keystroke) => keystroke,
+                    Err(error) => panic!("failed to parse keystroke {keystroke:?}: {error}"),
+                })
+                .collect::<Vec<_>>();
+            let contexts = contexts
+                .iter()
+                .map(|context| match gpui::KeyContext::parse(context) {
+                    Ok(context) => context,
+                    Err(error) => panic!("failed to parse key context {context:?}: {error}"),
+                })
+                .collect::<Vec<_>>();
+
+            gpui::Keymap::new(bindings)
+                .bindings_for_input(&keystrokes, &contexts)
+                .0
+                .iter()
+                .map(|binding| binding.action().name().to_string())
+                .collect()
+        })
+    }
+
+    #[gpui::test]
+    fn test_vim_buffer_surface_bindings(cx: &mut TestAppContext) {
+        init_keymap_test(cx);
+
+        let normal_editor = [
+            "Workspace",
+            "Pane NormalBuffer",
+            "Editor VimControl vim_mode=normal",
+        ];
+        let special_view = ["Workspace", "Pane SpecialBuffer", "MarkdownPreview"];
+        let special_editor = [
+            "Workspace",
+            "Pane SpecialBuffer",
+            "Editor VimControl vim_mode=normal",
+        ];
+        let special_terminal = ["Workspace", "Pane SpecialBuffer", "Terminal"];
+        let normal_notebook = [
+            "Workspace",
+            "Pane NormalBuffer",
+            "NotebookEditor notebook_mode=command",
+        ];
+        let transient_view = ["Workspace", "TransientSurface", "Picker"];
+        let transient_editor = [
+            "Workspace",
+            "TransientSurface",
+            "Editor VimControl vim_mode=normal",
+        ];
+
+        assert_eq!(
+            vim_bindings_for(&["q"], &normal_editor, cx).first(),
+            Some(&"vim::ToggleRecord".to_string())
+        );
+        assert_eq!(
+            vim_bindings_for(&["q"], &special_view, cx).first(),
+            Some(&"pane::CloseActiveItem".to_string())
+        );
+        assert_eq!(
+            vim_bindings_for(&["q"], &special_editor, cx).first(),
+            Some(&"pane::CloseActiveItem".to_string())
+        );
+        assert_eq!(
+            vim_bindings_for(&["q"], &transient_editor, cx).first(),
+            Some(&"menu::Cancel".to_string())
+        );
+        assert_eq!(
+            vim_bindings_for(&["q"], &transient_view, cx).first(),
+            Some(&"menu::Cancel".to_string())
+        );
+        assert_eq!(
+            vim_bindings_for(&["space", "b", "k"], &normal_editor, cx).first(),
+            Some(&"pane::CloseActiveItem".to_string())
+        );
+        assert_eq!(
+            vim_bindings_for(&["space", "b", "k"], &normal_notebook, cx).first(),
+            Some(&"pane::CloseActiveItem".to_string())
+        );
+        assert!(
+            !vim_bindings_for(&["q"], &special_terminal, cx)
+                .iter()
+                .any(|action| action == "pane::CloseActiveItem")
+        );
+
+        let special_editor_insert = [
+            "Workspace",
+            "Pane SpecialBuffer",
+            "Editor VimControl vim_mode=insert",
+        ];
+        assert!(
+            !vim_bindings_for(&["q"], &special_editor_insert, cx)
+                .iter()
+                .any(|action| action == "pane::CloseActiveItem")
+        );
+    }
+
     /// `editor::MoveDown` and `editor::MoveUp` propagate when the cursor doesn't move, which at the
     /// ends of a buffer let `ctrl-n` and `ctrl-p` fall through to the default bindings and open a
     /// new file / the file finder.

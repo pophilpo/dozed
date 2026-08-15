@@ -328,6 +328,7 @@ impl Render for ModalLayer {
         }
 
         div()
+            .key_context("TransientSurface")
             .absolute()
             .size_full()
             .inset_0()
@@ -343,6 +344,9 @@ impl Render for ModalLayer {
                     this.hide_modal(window, cx);
                 }),
             )
+            .on_action(cx.listener(|this, _: &menu::Cancel, window, cx| {
+                this.hide_modal(window, cx);
+            }))
             .child(
                 v_flex()
                     .h(px(0.0))

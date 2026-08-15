@@ -11817,7 +11817,7 @@ mod tests {
         init_test(cx);
 
         let item = cx.new(TestItem::new);
-        assert_eq!(ItemHandle::surface_role(&item), SurfaceRole::Buffer);
+        assert_eq!(ItemHandle::surface_role(&item), SurfaceRole::SpecialBuffer);
 
         let panel = cx.new(|cx| TestPanel::new(DockPosition::Left, 100, cx));
         assert_eq!(
@@ -15071,13 +15071,15 @@ mod tests {
     }
 
     #[gpui::test]
-    async fn test_modal_uses_workspace_focus_fallback(cx: &mut gpui::TestAppContext) {
+    async fn test_modal_cancel_uses_workspace_focus_fallback(cx: &mut gpui::TestAppContext) {
         init_test(cx);
 
         let fs = FakeFs::new(cx.executor());
         let project = Project::test(fs, [], cx).await;
-        let (workspace, cx) =
-            cx.add_window_view(|window, cx| Workspace::test_new(project, window, cx));
+        let (multi_workspace, cx) =
+            cx.add_window_view(|window, cx| MultiWorkspace::test_new(project, window, cx));
+        let workspace =
+            multi_workspace.read_with(cx, |multi_workspace, _| multi_workspace.workspace().clone());
         let workspace_focus = workspace.read_with(cx, |workspace, cx| workspace.focus_handle(cx));
         let previous_focus = cx.update(|window, cx| {
             let previous_focus = cx.focus_handle();
@@ -15091,11 +15093,10 @@ mod tests {
         cx.run_until_parked();
         drop(previous_focus);
 
-        workspace.update_in(cx, |workspace, window, cx| {
-            workspace.hide_modal(window, cx);
-        });
+        cx.dispatch_action(menu::Cancel);
 
         cx.update(|window, cx| {
+            assert!(workspace.read(cx).active_modal::<TestModal>(cx).is_none());
             assert!(workspace_focus.contains_focused(window, cx));
         });
     }

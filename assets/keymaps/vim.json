@@ -1235,6 +1235,24 @@
     },
   },
   {
+    "context": "((SpecialBuffer && !Editor) || (SpecialBuffer > vim_mode == normal)) && !Terminal && !menu",
+    "bindings": {
+      "q": "pane::CloseActiveItem",
+    },
+  },
+  {
+    "context": "(TransientSurface && !Editor) || (TransientSurface > vim_mode == normal)",
+    "bindings": {
+      "q": "menu::Cancel",
+    },
+  },
+  {
+    "context": "(NormalBuffer && !Editor) || (NormalBuffer > vim_mode == normal)",
+    "bindings": {
+      "space b k": "pane::CloseActiveItem",
+    },
+  },
+  {
     "context": "ProjectSidebar",
     "bindings": {
       "j": "vim::MenuSelectNext",

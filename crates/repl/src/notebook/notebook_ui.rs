@@ -1774,6 +1774,7 @@ impl EventEmitter<()> for NotebookEditor {}
 
 impl Item for NotebookEditor {
     type Event = ();
+    const SURFACE_ROLE: workspace::SurfaceRole = workspace::SurfaceRole::NormalBuffer;
 
     fn can_split(&self) -> bool {
         true

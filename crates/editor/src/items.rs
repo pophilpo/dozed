@@ -626,6 +626,7 @@ fn deserialize_anchor(anchor: proto::EditorAnchor, buffer: &MultiBufferSnapshot)
 
 impl Item for Editor {
     type Event = EditorEvent;
+    const SURFACE_ROLE: workspace::SurfaceRole = workspace::SurfaceRole::NormalBuffer;
 
     fn act_as_type<'a>(
         &'a self,
@@ -2472,6 +2473,14 @@ mod tests {
     use std::path::{Path, PathBuf};
     use util::{path, paths::PathWithPosition, rel_path::RelPath};
     use workspace::path_link::{OpenTarget, OpenTargetFoundBy};
+
+    #[test]
+    fn test_editor_is_a_normal_buffer() {
+        assert_eq!(
+            <Editor as Item>::SURFACE_ROLE,
+            workspace::SurfaceRole::NormalBuffer
+        );
+    }
 
     #[gpui::test]
     fn test_path_for_file(cx: &mut App) {

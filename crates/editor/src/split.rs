@@ -1982,6 +1982,7 @@ impl SplittableEditor {
 
 impl Item for SplittableEditor {
     type Event = EditorEvent;
+    const SURFACE_ROLE: workspace::SurfaceRole = workspace::SurfaceRole::NormalBuffer;
 
     fn tab_content_text(&self, detail: usize, cx: &App) -> ui::SharedString {
         self.rhs_editor.read(cx).tab_content_text(detail, cx)

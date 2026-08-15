@@ -2,7 +2,8 @@ use gpui::{App, FocusHandle, WeakFocusHandle, Window};
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub enum SurfaceRole {
-    Buffer,
+    NormalBuffer,
+    SpecialBuffer,
     PersistentPanel,
     Transient,
 }

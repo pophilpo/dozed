@@ -3,8 +3,11 @@
 Dozed classifies interactive surfaces by their lifecycle, not by their visual
 shape. Every surface has one role:
 
-- **Buffer**: Working state in the center area. It participates in pane
-  navigation and history, and remains open until you close it.
+- **Normal buffer**: Source code and editable text in the center area. It
+  participates in pane navigation and history, and remains open until you kill
+  it.
+- **Special buffer**: Non-code pane content such as diagnostics, previews, and
+  dashboards. It has a local quit command in Vim normal mode.
 - **Persistent panel**: A workspace tool such as the project tree, Git panel,
   or terminal. It remains available until you toggle or close it.
 - **Transient**: A short interaction such as a picker, prompt, or workspace
@@ -12,8 +15,11 @@ shape. Every surface has one role:
 
 ## Decisions {#dozed-surface-decisions}
 
-- The container owns the role. Embedding an editor or picker does not turn a
+- The container owns the role. Pane items additionally declare whether they are
+  normal or special buffers. Embedding an editor or picker does not turn a
   transient surface into a buffer.
+- In Vim normal mode, the local quit command closes special buffers and
+  transient surfaces. Normal buffers use the buffer-kill command instead.
 - Mouse, Vim, and command-driven interaction follow the same lifecycle rules.
 - Closing a transient surface restores the previous valid focus. If that focus
   no longer exists, focus returns to the active workspace.

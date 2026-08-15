@@ -169,6 +169,7 @@ pub enum ItemBufferKind {
 
 pub trait Item: Focusable + EventEmitter<Self::Event> + Render + Sized {
     type Event;
+    const SURFACE_ROLE: crate::SurfaceRole = crate::SurfaceRole::SpecialBuffer;
 
     /// Returns the tab contents.
     ///
@@ -610,7 +611,7 @@ impl dyn ItemHandle {
 
 impl<T: Item> ItemHandle for Entity<T> {
     fn surface_role(&self) -> crate::SurfaceRole {
-        crate::SurfaceRole::Buffer
+        T::SURFACE_ROLE
     }
 
     fn subscribe_to_item_events(

@@ -4343,8 +4343,11 @@ impl Render for Pane {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let mut key_context = KeyContext::new_with_defaults();
         key_context.add("Pane");
-        if self.active_item().is_none() {
-            key_context.add("EmptyPane");
+        match self.active_item().map(|item| item.surface_role()) {
+            None => key_context.add("EmptyPane"),
+            Some(crate::SurfaceRole::NormalBuffer) => key_context.add("NormalBuffer"),
+            Some(crate::SurfaceRole::SpecialBuffer) => key_context.add("SpecialBuffer"),
+            Some(crate::SurfaceRole::PersistentPanel | crate::SurfaceRole::Transient) => {}
         }
 
         self.toolbar
