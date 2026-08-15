@@ -74,6 +74,7 @@
             cargo-hakari
             cargo-machete
             cargo-zigbuild
+            direnv
             # TODO: package protobuf-language-server for editing zed.proto
             # TODO: add other tools used in our scripts
 
