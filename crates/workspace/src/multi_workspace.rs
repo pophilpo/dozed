@@ -6,8 +6,8 @@ use gpui::{
     ManagedView, MouseButton, Pixels, Render, Subscription, Task, TaskExt, WeakEntity, Window,
     WindowId, actions, deferred, px,
 };
+use project::Project;
 pub use project::ProjectGroupKey;
-use project::{DisableAiSettings, Project};
 use remote::RemoteConnectionOptions;
 use settings::Settings;
 pub use settings::SidebarSide;
@@ -330,7 +330,7 @@ impl MultiWorkspace {
 
     pub fn sidebar_render_state(&self, cx: &App) -> SidebarRenderState {
         SidebarRenderState {
-            open: self.sidebar_open() && self.multi_workspace_enabled(cx),
+            open: self.sidebar_open(),
             side: self.sidebar_side(cx),
         }
     }
@@ -345,18 +345,6 @@ impl MultiWorkspace {
             }
         });
         let quit_subscription = cx.on_app_quit(Self::app_will_quit);
-        let settings_subscription = cx.observe_global_in::<settings::SettingsStore>(window, {
-            let mut previous_multi_workspace_enabled = !DisableAiSettings::get_global(cx)
-                .disable_ai
-                && AgentSettings::get_global(cx).enabled;
-            move |this, window, cx| {
-                let multi_workspace_enabled = this.multi_workspace_enabled(cx);
-                if previous_multi_workspace_enabled && !multi_workspace_enabled {
-                    this.collapse_to_single_workspace(window, cx);
-                }
-                previous_multi_workspace_enabled = multi_workspace_enabled;
-            }
-        });
         Self::subscribe_to_workspace(&workspace, window, cx);
         let weak_self = cx.weak_entity();
         let active_workspace_id = Rc::new(Cell::new(workspace.entity_id()));
@@ -377,11 +365,7 @@ impl MultiWorkspace {
             sidebar_overlay: None,
             pending_removal_tasks: Vec::new(),
             _serialize_task: None,
-            _subscriptions: vec![
-                release_subscription,
-                quit_subscription,
-                settings_subscription,
-            ],
+            _subscriptions: vec![release_subscription, quit_subscription],
             previous_focus_handle: None,
         }
     }
@@ -425,15 +409,7 @@ impl MultiWorkspace {
             .map_or(false, |s| s.is_threads_list_view_active(cx))
     }
 
-    pub fn multi_workspace_enabled(&self, cx: &App) -> bool {
-        !DisableAiSettings::get_global(cx).disable_ai && AgentSettings::get_global(cx).enabled
-    }
-
     pub fn toggle_sidebar(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if !self.multi_workspace_enabled(cx) {
-            return;
-        }
-
         if self.sidebar_open() {
             self.close_sidebar(window, cx);
         } else {
@@ -447,20 +423,12 @@ impl MultiWorkspace {
     }
 
     pub fn close_sidebar_action(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if !self.multi_workspace_enabled(cx) {
-            return;
-        }
-
         if self.sidebar_open() {
             self.close_sidebar(window, cx);
         }
     }
 
     pub fn focus_sidebar(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if !self.multi_workspace_enabled(cx) {
-            return;
-        }
-
         if self.sidebar_open() {
             let sidebar_is_focused = self
                 .sidebar
@@ -1322,20 +1290,15 @@ impl MultiWorkspace {
         }
 
         let old_active_workspace = self.workspace().clone();
-        let old_active_was_retained = self.active_workspace_is_retained();
-        let should_retain_workspaces = self.multi_workspace_enabled(cx);
-
-        if should_retain_workspaces && !old_active_was_retained {
+        if !self.active_workspace_is_retained() {
             let key = old_active_workspace.read(cx).project_group_key(cx);
             let index = self.hold(old_active_workspace.clone(), window, cx);
             self.pin(index, key, cx);
         }
 
         let displayed = self.hold(workspace.clone(), window, cx);
-        if should_retain_workspaces {
-            let key = workspace.read(cx).project_group_key(cx);
-            self.pin(displayed, key, cx);
-        }
+        let key = workspace.read(cx).project_group_key(cx);
+        self.pin(displayed, key, cx);
 
         // Publish the new active workspace before anyone reads the shared cell
         // to decide who owns the window chrome.
@@ -1348,10 +1311,6 @@ impl MultiWorkspace {
             .max()
             .map_or(0, |max| max + 1);
         self.held[displayed].activated_at = Some(stamp);
-
-        if !should_retain_workspaces && !old_active_was_retained {
-            self.detach_workspace(&old_active_workspace, cx);
-        }
 
         // The platform window is shared across all workspaces in this window.
         // The previously-active workspace left the title and edited indicator
@@ -1378,27 +1337,6 @@ impl MultiWorkspace {
         let key = self.held[index].workspace.read(cx).project_group_key(cx);
         self.pin(index, key, cx);
         self.serialize(cx);
-        cx.notify();
-    }
-
-    /// Collapses to a single workspace, discarding all groups.
-    /// Used when multi-workspace is disabled by settings.
-    fn collapse_to_single_workspace(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if self.sidebar_open {
-            self.close_sidebar(window, cx);
-        }
-
-        let displayed_workspace = self.workspace().clone();
-        for workspace in self.workspaces().cloned().collect::<Vec<_>>() {
-            if workspace != displayed_workspace {
-                self.detach_workspace(&workspace, cx);
-            }
-        }
-
-        for held in &mut self.held {
-            held.pinned = false;
-        }
-        self.project_groups.clear();
         cx.notify();
     }
 
@@ -1931,91 +1869,69 @@ impl MultiWorkspace {
     pub fn open_project(
         &mut self,
         paths: Vec<PathBuf>,
-        open_mode: OpenMode,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Task<Result<Entity<Workspace>>> {
-        if self.multi_workspace_enabled(cx) {
-            let empty_workspace = if self
-                .workspace()
-                .read(cx)
-                .project()
-                .read(cx)
-                .visible_worktrees(cx)
-                .next()
-                .is_none()
-            {
-                Some(self.workspace().clone())
-            } else {
-                None
-            };
-
-            cx.spawn_in(window, async move |this, cx| {
-                if let Some(empty_workspace) = empty_workspace.as_ref() {
-                    let should_continue = empty_workspace
-                        .update_in(cx, |workspace, window, cx| {
-                            workspace.prepare_to_close(CloseIntent::ReplaceWindow, window, cx)
-                        })?
-                        .await?;
-                    if !should_continue {
-                        return Ok(empty_workspace.clone());
-                    }
-                }
-
-                let create_task = this.update_in(cx, |this, window, cx| {
-                    this.find_or_create_local_workspace(
-                        PathList::new(&paths),
-                        None,
-                        None,
-                        OpenMode::Activate,
-                        None,
-                        window,
-                        cx,
-                    )
-                })?;
-                let new_workspace = create_task.await?;
-
-                if let Some(empty_workspace) = empty_workspace
-                    && empty_workspace != new_workspace
-                {
-                    this.update(cx, |this, cx| {
-                        if this.is_workspace_retained(&empty_workspace) {
-                            this.detach_workspace(&empty_workspace, cx);
-                        }
-                    })?;
-                }
-
-                Ok(new_workspace)
-            })
+        let empty_workspace = if self
+            .workspace()
+            .read(cx)
+            .project()
+            .read(cx)
+            .visible_worktrees(cx)
+            .next()
+            .is_none()
+        {
+            Some(self.workspace().clone())
         } else {
-            let workspace = self.workspace().clone();
-            cx.spawn_in(window, async move |_this, cx| {
-                let should_continue = workspace
+            None
+        };
+
+        cx.spawn_in(window, async move |this, cx| {
+            if let Some(empty_workspace) = empty_workspace.as_ref() {
+                let should_continue = empty_workspace
                     .update_in(cx, |workspace, window, cx| {
-                        workspace.prepare_to_close(crate::CloseIntent::ReplaceWindow, window, cx)
+                        workspace.prepare_to_close(CloseIntent::ReplaceWindow, window, cx)
                     })?
                     .await?;
-                if should_continue {
-                    workspace
-                        .update_in(cx, |workspace, window, cx| {
-                            workspace.open_workspace_for_paths(open_mode, paths, window, cx)
-                        })?
-                        .await
-                } else {
-                    Ok(workspace)
+                if !should_continue {
+                    return Ok(empty_workspace.clone());
                 }
-            })
-        }
+            }
+
+            let create_task = this.update_in(cx, |this, window, cx| {
+                this.find_or_create_local_workspace(
+                    PathList::new(&paths),
+                    None,
+                    None,
+                    OpenMode::Activate,
+                    None,
+                    window,
+                    cx,
+                )
+            })?;
+            let new_workspace = create_task.await?;
+
+            if let Some(empty_workspace) = empty_workspace
+                && empty_workspace != new_workspace
+            {
+                this.update(cx, |this, cx| {
+                    if this.is_workspace_retained(&empty_workspace) {
+                        this.detach_workspace(&empty_workspace, cx);
+                    }
+                })?;
+            }
+
+            Ok(new_workspace)
+        })
     }
 }
 
 impl Render for MultiWorkspace {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let multi_workspace_enabled = self.multi_workspace_enabled(cx);
         let sidebar_side = self.sidebar_side(cx);
         let sidebar_on_right = sidebar_side == SidebarSide::Right;
 
-        let sidebar: Option<AnyElement> = if multi_workspace_enabled && self.sidebar_open() {
+        let sidebar: Option<AnyElement> = if self.sidebar_open() {
             self.sidebar.as_ref().map(|sidebar_handle| {
                 let weak = cx.weak_entity();
 
@@ -2095,84 +2011,75 @@ impl Render for MultiWorkspace {
                 .font(ui_font)
                 .text_color(text_color)
                 .on_action(cx.listener(Self::close_window))
-                .when(self.multi_workspace_enabled(cx), |this| {
-                    this.on_action(cx.listener(
-                        |this: &mut Self, _: &ToggleWorkspaceSidebar, window, cx| {
-                            this.toggle_sidebar(window, cx);
-                        },
-                    ))
-                    .on_action(cx.listener(
-                        |this: &mut Self, _: &CloseWorkspaceSidebar, window, cx| {
-                            this.close_sidebar_action(window, cx);
-                        },
-                    ))
-                    .on_action(cx.listener(
-                        |this: &mut Self, _: &FocusWorkspaceSidebar, window, cx| {
-                            this.focus_sidebar(window, cx);
-                        },
-                    ))
-                    .on_action(cx.listener(
-                        |this: &mut Self, action: &ToggleThreadSwitcher, window, cx| {
-                            if let Some(sidebar) = &this.sidebar {
-                                sidebar.toggle_thread_switcher(action.select_last, window, cx);
-                            }
-                        },
-                    ))
-                    .on_action(cx.listener(|this: &mut Self, _: &NextProject, window, cx| {
-                        if let Some(sidebar) = &this.sidebar {
-                            sidebar.cycle_project(true, window, cx);
-                        }
-                    }))
-                    .on_action(
-                        cx.listener(|this: &mut Self, _: &PreviousProject, window, cx| {
-                            if let Some(sidebar) = &this.sidebar {
-                                sidebar.cycle_project(false, window, cx);
-                            }
-                        }),
-                    )
-                    .on_action(cx.listener(|this: &mut Self, _: &NextThread, window, cx| {
-                        if let Some(sidebar) = &this.sidebar {
-                            sidebar.cycle_thread(true, window, cx);
-                        }
-                    }))
-                    .on_action(
-                        cx.listener(|this: &mut Self, _: &PreviousThread, window, cx| {
-                            if let Some(sidebar) = &this.sidebar {
-                                sidebar.cycle_thread(false, window, cx);
-                            }
-                        }),
-                    )
-                    .when(self.project_group_keys().len() >= 2, |el| {
-                        el.on_action(cx.listener(
-                            |this: &mut Self, _: &MoveProjectToNewWindow, window, cx| {
-                                let key =
-                                    this.project_group_key_for_workspace(this.workspace(), cx);
-                                this.open_project_group_in_new_window(&key, window, cx)
-                                    .detach_and_log_err(cx);
-                            },
-                        ))
-                    })
-                })
-                .when(
-                    self.sidebar_open() && self.multi_workspace_enabled(cx),
-                    |this| {
-                        this.on_drag_move(cx.listener(
-                            move |this: &mut Self,
-                                  e: &DragMoveEvent<DraggedSidebar>,
-                                  window,
-                                  cx| {
-                                if let Some(sidebar) = &this.sidebar {
-                                    let new_width = if sidebar_on_right {
-                                        window.bounds().size.width - e.event.position.x
-                                    } else {
-                                        e.event.position.x
-                                    };
-                                    sidebar.set_width(Some(new_width), cx);
-                                }
-                            },
-                        ))
+                .on_action(cx.listener(
+                    |this: &mut Self, _: &ToggleWorkspaceSidebar, window, cx| {
+                        this.toggle_sidebar(window, cx);
                     },
+                ))
+                .on_action(
+                    cx.listener(|this: &mut Self, _: &CloseWorkspaceSidebar, window, cx| {
+                        this.close_sidebar_action(window, cx);
+                    }),
                 )
+                .on_action(
+                    cx.listener(|this: &mut Self, _: &FocusWorkspaceSidebar, window, cx| {
+                        this.focus_sidebar(window, cx);
+                    }),
+                )
+                .on_action(cx.listener(
+                    |this: &mut Self, action: &ToggleThreadSwitcher, window, cx| {
+                        if let Some(sidebar) = &this.sidebar {
+                            sidebar.toggle_thread_switcher(action.select_last, window, cx);
+                        }
+                    },
+                ))
+                .on_action(cx.listener(|this: &mut Self, _: &NextProject, window, cx| {
+                    if let Some(sidebar) = &this.sidebar {
+                        sidebar.cycle_project(true, window, cx);
+                    }
+                }))
+                .on_action(
+                    cx.listener(|this: &mut Self, _: &PreviousProject, window, cx| {
+                        if let Some(sidebar) = &this.sidebar {
+                            sidebar.cycle_project(false, window, cx);
+                        }
+                    }),
+                )
+                .on_action(cx.listener(|this: &mut Self, _: &NextThread, window, cx| {
+                    if let Some(sidebar) = &this.sidebar {
+                        sidebar.cycle_thread(true, window, cx);
+                    }
+                }))
+                .on_action(
+                    cx.listener(|this: &mut Self, _: &PreviousThread, window, cx| {
+                        if let Some(sidebar) = &this.sidebar {
+                            sidebar.cycle_thread(false, window, cx);
+                        }
+                    }),
+                )
+                .when(self.project_group_keys().len() >= 2, |el| {
+                    el.on_action(cx.listener(
+                        |this: &mut Self, _: &MoveProjectToNewWindow, window, cx| {
+                            let key = this.project_group_key_for_workspace(this.workspace(), cx);
+                            this.open_project_group_in_new_window(&key, window, cx)
+                                .detach_and_log_err(cx);
+                        },
+                    ))
+                })
+                .when(self.sidebar_open(), |this| {
+                    this.on_drag_move(cx.listener(
+                        move |this: &mut Self, e: &DragMoveEvent<DraggedSidebar>, window, cx| {
+                            if let Some(sidebar) = &this.sidebar {
+                                let new_width = if sidebar_on_right {
+                                    window.bounds().size.width - e.event.position.x
+                                } else {
+                                    e.event.position.x
+                                };
+                                sidebar.set_width(Some(new_width), cx);
+                            }
+                        },
+                    ))
+                })
                 .children(left_sidebar)
                 .child(
                     div()

@@ -21,6 +21,17 @@ Other platforms are not yet available:
 - [Building Zed for Linux](./docs/src/development/linux.md)
 - [Building Zed for Windows](./docs/src/development/windows.md)
 
+On NixOS, enter the complete development environment with:
+
+```sh
+nix develop --accept-flake-config
+cargo run -p zed
+```
+
+The flake also supports `nix build` for a release build, `nix build .#debug`
+for a debug build, and `nix run` to build and launch Zed. If direnv is enabled,
+run `direnv allow` once to load the development environment automatically.
+
 ### Contributing
 
 See [CONTRIBUTING.md](./CONTRIBUTING.md) for ways you can contribute to Zed.

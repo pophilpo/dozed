@@ -2104,7 +2104,7 @@ fn open_local_project(
                 if let Some(handle) = multi_workspace_handle {
                     if let Some(task) = handle
                         .update(cx, |multi_workspace, window, cx| {
-                            multi_workspace.open_project(paths, OpenMode::Activate, window, cx)
+                            multi_workspace.open_project(paths, window, cx)
                         })
                         .log_err()
                     {
@@ -2157,12 +2157,7 @@ impl RecentProjectsDelegate {
                             cx.defer(move |cx| {
                                 if let Some(task) = handle
                                     .update(cx, |multi_workspace, window, cx| {
-                                        multi_workspace.open_project(
-                                            paths,
-                                            OpenMode::Activate,
-                                            window,
-                                            cx,
-                                        )
+                                        multi_workspace.open_project(paths, window, cx)
                                     })
                                     .log_err()
                                 {

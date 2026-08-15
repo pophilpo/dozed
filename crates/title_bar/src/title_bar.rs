@@ -798,8 +798,7 @@ impl TitleBar {
             .as_ref()
             .and_then(|mw| mw.upgrade())
             .map(|mw| mw.read(cx).sidebar_open())
-            .unwrap_or(false)
-            && PlatformTitleBar::is_multi_workspace_enabled(cx);
+            .unwrap_or(false);
 
         let is_threads_list_view_active = self
             .multi_workspace

@@ -85,12 +85,11 @@ impl SidebarStatus {
             .and_then(|mw| mw.upgrade())
             .map(|mw| {
                 let mw = mw.read(cx);
-                let enabled = mw.multi_workspace_enabled(cx);
                 Self {
-                    open: mw.sidebar_open() && enabled,
+                    open: mw.sidebar_open(),
                     side: mw.sidebar_side(cx),
                     has_notifications: mw.sidebar_has_notifications(cx),
-                    show_toggle: enabled,
+                    show_toggle: true,
                 }
             })
             .unwrap_or_default()
