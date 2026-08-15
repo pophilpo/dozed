@@ -1233,6 +1233,20 @@
     },
   },
   {
+    "context": "ProjectSidebar",
+    "bindings": {
+      "j": "vim::MenuSelectNext",
+      "k": "vim::MenuSelectPrevious",
+      "down": "vim::MenuSelectNext",
+      "up": "vim::MenuSelectPrevious",
+      "g g": "menu::SelectFirst",
+      "shift-g": "menu::SelectLast",
+      "enter": "menu::Confirm",
+      "q": "menu::Cancel",
+      "escape": "menu::Cancel",
+    },
+  },
+  {
     "context": "ThreadsSidebar && !Editor",
     "bindings": {
       "j": "menu::SelectNext",
