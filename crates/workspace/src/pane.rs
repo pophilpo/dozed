@@ -4345,9 +4345,7 @@ impl Render for Pane {
         key_context.add("Pane");
         match self.active_item().map(|item| item.surface_role()) {
             None => key_context.add("EmptyPane"),
-            Some(crate::SurfaceRole::NormalBuffer) => key_context.add("NormalBuffer"),
-            Some(crate::SurfaceRole::SpecialBuffer) => key_context.add("SpecialBuffer"),
-            Some(crate::SurfaceRole::PersistentPanel | crate::SurfaceRole::Transient) => {}
+            Some(surface_role) => key_context.add(surface_role.key_context()),
         }
 
         self.toolbar

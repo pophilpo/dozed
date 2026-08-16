@@ -8,6 +8,17 @@ pub enum SurfaceRole {
     Transient,
 }
 
+impl SurfaceRole {
+    pub(crate) fn key_context(self) -> &'static str {
+        match self {
+            Self::NormalBuffer => "NormalBuffer",
+            Self::SpecialBuffer => "SpecialBuffer",
+            Self::PersistentPanel => "PersistentPanel",
+            Self::Transient => "TransientSurface",
+        }
+    }
+}
+
 pub(crate) struct SurfaceFocusRestore {
     previous_focus_handle: Option<WeakFocusHandle>,
 }

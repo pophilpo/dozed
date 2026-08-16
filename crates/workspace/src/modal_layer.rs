@@ -328,7 +328,7 @@ impl Render for ModalLayer {
         }
 
         div()
-            .key_context("TransientSurface")
+            .key_context(crate::SurfaceRole::Transient.key_context())
             .absolute()
             .size_full()
             .inset_0()

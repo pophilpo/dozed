@@ -9,7 +9,8 @@ shape. Every surface has one role:
 - **Special buffer**: Non-code pane content such as diagnostics, previews, and
   dashboards. It has a local quit command in Vim normal mode.
 - **Persistent panel**: A workspace tool such as the project tree, Git panel,
-  or terminal. It remains available until you toggle or close it.
+  or terminal. Navigational panels have a local quit command. The terminal
+  keeps terminal input semantics until it gains its own modal editing model.
 - **Transient**: A short interaction such as a picker, prompt, or workspace
   selector. Confirming or cancelling dismisses it.
 
@@ -18,8 +19,11 @@ shape. Every surface has one role:
 - The container owns the role. Pane items additionally declare whether they are
   normal or special buffers. Embedding an editor or picker does not turn a
   transient surface into a buffer.
-- In Vim normal mode, the local quit command closes special buffers and
-  transient surfaces. Normal buffers use the buffer-kill command instead.
+- In Vim normal mode, the local quit command closes special buffers,
+  transient surfaces, and navigational persistent panels. Normal buffers use
+  the buffer-kill command instead.
+- Pickers and context menus follow the transient local-quit rule even when they
+  are not hosted by the modal layer.
 - Mouse, Vim, and command-driven interaction follow the same lifecycle rules.
 - Closing a transient surface restores the previous valid focus. If that focus
   no longer exists, focus returns to the active workspace.

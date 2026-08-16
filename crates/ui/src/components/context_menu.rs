@@ -2197,6 +2197,7 @@ impl Render for ContextMenu {
         let window_size = window.viewport_size();
         let rem_size = window.rem_size();
         let is_wide_window = window_size.width / rem_size > rems_from_px(800_f32).0;
+        let key_context = format!("{} ContextMenu", self.key_context.as_ref());
 
         let mut focus_submenu: Option<FocusHandle> = None;
 
@@ -2290,7 +2291,7 @@ impl Render for ContextMenu {
                         })
                         .overflow_y_scroll()
                         .track_focus(&self.focus_handle(cx))
-                        .key_context(self.key_context.as_ref())
+                        .key_context(key_context.as_str())
                         .on_action(cx.listener(ContextMenu::select_first))
                         .on_action(cx.listener(ContextMenu::handle_select_last))
                         .on_action(cx.listener(ContextMenu::select_next))

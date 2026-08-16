@@ -1235,7 +1235,7 @@
     },
   },
   {
-    "context": "((SpecialBuffer && !Editor) || (SpecialBuffer > vim_mode == normal)) && !Terminal && !menu",
+    "context": "((SpecialBuffer && !Editor) || (SpecialBuffer > vim_mode == normal)) && !Terminal",
     "bindings": {
       "q": "pane::CloseActiveItem",
     },
@@ -1250,6 +1250,30 @@
     "context": "(NormalBuffer && !Editor) || (NormalBuffer > vim_mode == normal)",
     "bindings": {
       "space b k": "pane::CloseActiveItem",
+    },
+  },
+  {
+    "context": "((PersistentPanel && !Editor) || (PersistentPanel > vim_mode == normal)) && !TerminalPanel",
+    "bindings": {
+      "q": "workspace::CloseActiveDock",
+    },
+  },
+  {
+    "context": "(Picker && !Editor) || (Picker > vim_mode == normal)",
+    "bindings": {
+      "q": "menu::Cancel",
+    },
+  },
+  {
+    "context": "(ContextMenu && !Editor) || (vim_mode == normal > ContextMenu)",
+    "bindings": {
+      "q": "menu::Cancel",
+    },
+  },
+  {
+    "context": "Editor && vim_mode == normal && menu",
+    "bindings": {
+      "q": "menu::Cancel",
     },
   },
   {

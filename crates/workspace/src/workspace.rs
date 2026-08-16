@@ -4325,6 +4325,7 @@ impl Workspace {
             dock.update(cx, |dock, cx| {
                 dock.set_open(false, window, cx);
             });
+            self.surface_focus_fallback(window, cx).focus(window, cx);
             return true;
         }
         false
@@ -8125,7 +8126,11 @@ impl Workspace {
                 }
             }
         }
-        target.unwrap_or_else(|| self.active_pane.focus_handle(cx))
+        target.unwrap_or_else(|| {
+            self.active_item(cx)
+                .map(|item| item.item_focus_handle(cx))
+                .unwrap_or_else(|| self.active_pane.focus_handle(cx))
+        })
     }
 
     pub fn hide_modal(&mut self, window: &mut Window, cx: &mut App) -> bool {
@@ -11824,6 +11829,48 @@ mod tests {
             PanelHandle::surface_role(&panel),
             SurfaceRole::PersistentPanel
         );
+    }
+
+    #[gpui::test]
+    async fn test_close_active_dock_focuses_active_item(cx: &mut TestAppContext) {
+        init_test(cx);
+
+        let fs = FakeFs::new(cx.executor());
+        let project = Project::test(fs, [], cx).await;
+        let (multi_workspace, cx) =
+            cx.add_window_view(|window, cx| MultiWorkspace::test_new(project, window, cx));
+        let workspace =
+            multi_workspace.read_with(cx, |multi_workspace, _| multi_workspace.workspace().clone());
+
+        let (panel, item) = workspace.update_in(cx, |workspace, window, cx| {
+            let panel = cx.new(|cx| TestPanel::new(DockPosition::Right, 100, cx));
+            workspace.add_panel(panel.clone(), window, cx);
+            workspace
+                .right_dock()
+                .update(cx, |dock, cx| dock.set_open(true, window, cx));
+
+            let item = cx.new(TestItem::new);
+            workspace.active_pane().update(cx, |pane, cx| {
+                pane.add_item(Box::new(item.clone()), true, true, None, window, cx);
+            });
+            (panel, item)
+        });
+        cx.run_until_parked();
+
+        workspace.update_in(cx, |workspace, window, cx| {
+            workspace.toggle_panel_focus::<TestPanel>(window, cx);
+        });
+
+        cx.update(|window, cx| {
+            assert!(panel.focus_handle(cx).contains_focused(window, cx));
+        });
+
+        cx.dispatch_action(CloseActiveDock);
+
+        workspace.update_in(cx, |workspace, window, cx| {
+            assert!(!workspace.right_dock().read(cx).is_open());
+            assert!(item.focus_handle(cx).is_focused(window));
+        });
     }
 
     #[gpui::test]

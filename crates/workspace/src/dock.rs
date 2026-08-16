@@ -1084,9 +1084,13 @@ impl Dock {
         }
     }
 
-    fn dispatch_context() -> KeyContext {
+    fn dispatch_context(&self) -> KeyContext {
         let mut dispatch_context = KeyContext::new_with_defaults();
         dispatch_context.add("Dock");
+        if let Some(panel) = self.visible_panel() {
+            dispatch_context.add(panel.surface_role().key_context());
+            dispatch_context.add(panel.persistent_name());
+        }
 
         dispatch_context
     }
@@ -1136,7 +1140,7 @@ impl Dock {
 
 impl Render for Dock {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let dispatch_context = Self::dispatch_context();
+        let dispatch_context = self.dispatch_context();
         if let Some(entry) = self.visible_entry() {
             let position = self.position;
             let create_resize_handle = || {

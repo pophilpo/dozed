@@ -5579,6 +5579,7 @@ mod tests {
             "Editor VimControl vim_mode=normal",
         ];
         let special_view = ["Workspace", "Pane SpecialBuffer", "MarkdownPreview"];
+        let special_menu_view = ["Workspace", "Pane SpecialBuffer", "MarkdownPreview menu"];
         let special_editor = [
             "Workspace",
             "Pane SpecialBuffer",
@@ -5596,6 +5597,35 @@ mod tests {
             "TransientSurface",
             "Editor VimControl vim_mode=normal",
         ];
+        let persistent_panel = [
+            "Workspace",
+            "Dock PersistentPanel ProjectPanel",
+            "ProjectPanel menu not_editing",
+        ];
+        let persistent_panel_editor = [
+            "Workspace",
+            "Dock PersistentPanel GitPanel",
+            "GitPanel",
+            "Editor VimControl vim_mode=normal",
+        ];
+        let terminal_panel = [
+            "Workspace",
+            "Dock PersistentPanel TerminalPanel",
+            "Pane SpecialBuffer",
+            "Terminal",
+        ];
+        let picker_editor = ["Workspace", "Picker", "Editor VimControl vim_mode=normal"];
+        let context_menu = [
+            "Workspace",
+            "Pane NormalBuffer",
+            "Editor VimControl vim_mode=normal",
+            "menu ContextMenu",
+        ];
+        let editor_menu = [
+            "Workspace",
+            "Pane NormalBuffer",
+            "Editor VimControl vim_mode=normal menu",
+        ];
 
         assert_eq!(
             vim_bindings_for(&["q"], &normal_editor, cx).first(),
@@ -5610,12 +5640,36 @@ mod tests {
             Some(&"pane::CloseActiveItem".to_string())
         );
         assert_eq!(
+            vim_bindings_for(&["q"], &special_menu_view, cx).first(),
+            Some(&"pane::CloseActiveItem".to_string())
+        );
+        assert_eq!(
             vim_bindings_for(&["q"], &transient_editor, cx).first(),
             Some(&"menu::Cancel".to_string())
         );
         assert_eq!(
             vim_bindings_for(&["q"], &transient_view, cx).first(),
             Some(&"menu::Cancel".to_string())
+        );
+        assert_eq!(
+            vim_bindings_for(&["q"], &picker_editor, cx).first(),
+            Some(&"menu::Cancel".to_string())
+        );
+        assert_eq!(
+            vim_bindings_for(&["q"], &context_menu, cx).first(),
+            Some(&"menu::Cancel".to_string())
+        );
+        assert_eq!(
+            vim_bindings_for(&["q"], &editor_menu, cx).first(),
+            Some(&"menu::Cancel".to_string())
+        );
+        assert_eq!(
+            vim_bindings_for(&["q"], &persistent_panel, cx).first(),
+            Some(&"workspace::CloseActiveDock".to_string())
+        );
+        assert_eq!(
+            vim_bindings_for(&["q"], &persistent_panel_editor, cx).first(),
+            Some(&"workspace::CloseActiveDock".to_string())
         );
         assert_eq!(
             vim_bindings_for(&["space", "b", "k"], &normal_editor, cx).first(),
@@ -5630,6 +5684,13 @@ mod tests {
                 .iter()
                 .any(|action| action == "pane::CloseActiveItem")
         );
+        assert!(
+            !vim_bindings_for(&["q"], &terminal_panel, cx)
+                .iter()
+                .any(|action| {
+                    action == "workspace::CloseActiveDock" || action == "pane::CloseActiveItem"
+                })
+        );
 
         let special_editor_insert = [
             "Workspace",
@@ -5640,6 +5701,18 @@ mod tests {
             !vim_bindings_for(&["q"], &special_editor_insert, cx)
                 .iter()
                 .any(|action| action == "pane::CloseActiveItem")
+        );
+
+        let persistent_panel_editor_insert = [
+            "Workspace",
+            "Dock PersistentPanel GitPanel",
+            "GitPanel",
+            "Editor VimControl vim_mode=insert",
+        ];
+        assert!(
+            !vim_bindings_for(&["q"], &persistent_panel_editor_insert, cx)
+                .iter()
+                .any(|action| action == "workspace::CloseActiveDock")
         );
     }
 
