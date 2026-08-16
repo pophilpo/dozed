@@ -27,6 +27,16 @@ shape. Every surface has one role:
   a buffer and closing a window remain separate operations.
 - Pickers and context menus follow the transient local-quit rule even when they
   are not hosted by the modal layer.
+- Directory browsing is a center-pane special buffer backed by the filesystem,
+  not bounded by the workspace's worktrees. It starts from the active file or
+  project root, falls back to the home directory in an empty workspace, and can
+  navigate to the filesystem root. Entering a different Git repository opens
+  it as a project workspace; ordinary directories remain in the same browser.
+  Directory search is incremental: accepting keeps the matched selection while
+  cancelling restores the selection from before the search. Vim next- and
+  previous-match commands continue the accepted search with wraparound.
+  The existing Project Panel remains available while directory-buffer
+  operations are added.
 - Mouse, Vim, and command-driven interaction follow the same lifecycle rules.
 - Center-pane maximize temporarily renders only the focused pane without
   changing the split tree, so restoring it recovers the exact prior layout.

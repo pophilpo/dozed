@@ -1,6 +1,12 @@
+mod directory_view;
 pub mod project_panel_settings;
 mod undo;
 mod utils;
+
+pub use directory_view::{
+    CancelSearch, ConfirmSearch, GoUp, OpenDirectory, ProjectDirectoryView, SearchNext,
+    SearchPrevious, StartSearch,
+};
 
 use anyhow::{Context as _, Result};
 use client::{ErrorCode, ErrorExt};
@@ -462,6 +468,9 @@ impl FoldedAncestors {
 
 pub fn init(cx: &mut App) {
     cx.observe_new(|workspace: &mut Workspace, _, _| {
+        workspace.register_action(|workspace, _: &OpenDirectory, window, cx| {
+            directory_view::open(workspace, window, cx);
+        });
         workspace.register_action(|workspace, _: &ToggleFocus, window, cx| {
             workspace.toggle_panel_focus::<ProjectPanel>(window, cx);
         });

@@ -1236,6 +1236,7 @@
   {
     "context": "((NormalBuffer > vim_mode == normal) || (SpecialBuffer > vim_mode == normal)) && !PersistentPanel",
     "bindings": {
+      "-": "project_browser::OpenDirectory",
       "space b n": "pane::ActivateNextItem",
       "space b p": "pane::ActivatePreviousItem",
       "space w q": "pane::JoinIntoNext",
@@ -1249,6 +1250,7 @@
   {
     "context": "((NormalBuffer && !Editor) || (SpecialBuffer && !Editor && !Terminal)) && !PersistentPanel",
     "bindings": {
+      "-": "project_browser::OpenDirectory",
       "space b n": "pane::ActivateNextItem",
       "space b p": "pane::ActivatePreviousItem",
       "space w q": "pane::JoinIntoNext",
@@ -1309,6 +1311,35 @@
     "context": "(Picker && !Editor) || (Picker > vim_mode == normal)",
     "bindings": {
       "q": "menu::Cancel",
+    },
+  },
+  {
+    "context": "ProjectDirectory && !ProjectDirectorySearch",
+    "bindings": {
+      "j": "menu::SelectNext",
+      "k": "menu::SelectPrevious",
+      "g g": "menu::SelectFirst",
+      "shift-g": "menu::SelectLast",
+      "h": "project_browser::GoUp",
+      "l": "menu::Confirm",
+      "enter": "menu::Confirm",
+      "/": "project_browser::StartSearch",
+      "n": "project_browser::SearchNext",
+      "shift-n": "project_browser::SearchPrevious",
+    },
+  },
+  {
+    "context": "ProjectDirectorySearch > Editor",
+    "bindings": {
+      "enter": "project_browser::ConfirmSearch",
+      "escape": "project_browser::CancelSearch",
+      "ctrl-[": "project_browser::CancelSearch",
+    },
+  },
+  {
+    "context": "EmptyPane",
+    "bindings": {
+      "-": "project_browser::OpenDirectory",
     },
   },
   {

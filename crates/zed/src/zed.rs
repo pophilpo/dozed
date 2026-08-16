@@ -5615,6 +5615,15 @@ mod tests {
             "Pane SpecialBuffer",
             "Terminal vi_mode",
         ];
+        let project_directory = ["Workspace", "Pane SpecialBuffer", "ProjectDirectory"];
+        let project_directory_search = [
+            "Workspace",
+            "Pane SpecialBuffer",
+            "ProjectDirectory",
+            "ProjectDirectorySearch",
+            "Editor mode=single_line",
+        ];
+        let empty_pane = ["Workspace", "Pane EmptyPane"];
         let picker_editor = ["Workspace", "Picker", "Editor VimControl vim_mode=normal"];
         let context_menu = [
             "Workspace",
@@ -5745,6 +5754,50 @@ mod tests {
         assert_eq!(
             vim_bindings_for(&["ctrl-w", "q"], &terminal_panel, cx).first(),
             Some(&"workspace::CloseActiveDock".to_string())
+        );
+        assert_eq!(
+            vim_bindings_for(&["-"], &normal_editor, cx).first(),
+            Some(&"project_browser::OpenDirectory".to_string())
+        );
+        assert_eq!(
+            vim_bindings_for(&["-"], &special_view, cx).first(),
+            Some(&"project_browser::OpenDirectory".to_string())
+        );
+        assert_eq!(
+            vim_bindings_for(&["-"], &empty_pane, cx).first(),
+            Some(&"project_browser::OpenDirectory".to_string())
+        );
+        for (keystrokes, expected_action) in [
+            (&["j"][..], "menu::SelectNext"),
+            (&["k"][..], "menu::SelectPrevious"),
+            (&["g", "g"][..], "menu::SelectFirst"),
+            (&["shift-g"][..], "menu::SelectLast"),
+            (&["h"][..], "project_browser::GoUp"),
+            (&["l"][..], "menu::Confirm"),
+            (&["enter"][..], "menu::Confirm"),
+            (&["/"][..], "project_browser::StartSearch"),
+            (&["n"][..], "project_browser::SearchNext"),
+            (&["shift-n"][..], "project_browser::SearchPrevious"),
+            (&["q"][..], "pane::CloseActiveItem"),
+        ] {
+            assert_eq!(
+                vim_bindings_for(keystrokes, &project_directory, cx).first(),
+                Some(&expected_action.to_string())
+            );
+        }
+        for (keystrokes, expected_action) in [
+            (&["enter"][..], "project_browser::ConfirmSearch"),
+            (&["escape"][..], "project_browser::CancelSearch"),
+            (&["ctrl-["][..], "project_browser::CancelSearch"),
+        ] {
+            assert_eq!(
+                vim_bindings_for(keystrokes, &project_directory_search, cx).first(),
+                Some(&expected_action.to_string())
+            );
+        }
+        assert_ne!(
+            vim_bindings_for(&["j"], &project_directory_search, cx).first(),
+            Some(&"menu::SelectNext".to_string())
         );
         assert_eq!(
             vim_bindings_for(&["space", "w", "m"], &normal_editor, cx).first(),
