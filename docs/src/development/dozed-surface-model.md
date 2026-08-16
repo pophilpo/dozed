@@ -25,6 +25,15 @@ shape. Every surface has one role:
 - Pickers and context menus follow the transient local-quit rule even when they
   are not hosted by the modal layer.
 - Mouse, Vim, and command-driven interaction follow the same lifecycle rules.
+- Center-pane maximize temporarily renders only the focused pane without
+  changing the split tree, so restoring it recovers the exact prior layout.
+  The pane renders flush with the center bounds because maximize is layout
+  state, not a transient card or overlay.
+  Project and Git panels are excluded until their replacements define this
+  behavior. Terminals participate in pane maximization whether they start in
+  the center or in the terminal dock; restoring a dock terminal returns it to
+  the still-open dock. Pending workspace key sequences are not forwarded to the
+  terminal, and terminal Vim cursor position is preserved across the resize.
 - Closing a transient surface restores the previous valid focus. If that focus
   no longer exists, focus returns to the active workspace.
 - The surface container captures and restores focus. Its content requests

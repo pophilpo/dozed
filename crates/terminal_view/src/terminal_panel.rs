@@ -1748,7 +1748,7 @@ mod tests {
     use pretty_assertions::assert_eq;
     use project::FakeFs;
     use settings::SettingsStore;
-    use workspace::MultiWorkspace;
+    use workspace::{MultiWorkspace, ToggleEditorZoom};
 
     #[test]
     fn test_prepare_empty_task() {
@@ -2378,6 +2378,152 @@ mod tests {
             center_items_after, center_items_before,
             "Center pane should not gain a new terminal"
         );
+    }
+
+    #[gpui::test]
+    async fn test_editor_zoom_promotes_terminal_panel_without_losing_focus(
+        cx: &mut TestAppContext,
+    ) {
+        cx.executor().allow_parking();
+        init_test(cx);
+        cx.update(|cx| {
+            cx.bind_keys([
+                gpui::KeyBinding::new(
+                    "space w m",
+                    ToggleEditorZoom,
+                    Some("PersistentPanel > Terminal && vi_mode"),
+                ),
+                gpui::KeyBinding::new(
+                    "space w m",
+                    ToggleEditorZoom,
+                    Some("Terminal && vi_mode && !PersistentPanel"),
+                ),
+            ])
+        });
+
+        let (window_handle, terminal_panel) = init_workspace_with_panel(cx).await;
+
+        window_handle
+            .update(cx, |_, window, cx| {
+                terminal_panel.update(cx, |panel, cx| {
+                    panel.add_terminal_shell(None, RevealStrategy::Always, window, cx)
+                })
+            })
+            .expect("Failed to update terminal panel")
+            .await
+            .expect("Failed to create panel terminal");
+        cx.run_until_parked();
+
+        let terminal_focus = terminal_panel
+            .read_with(cx, |panel, cx| {
+                panel
+                    .active_pane
+                    .read(cx)
+                    .active_item()
+                    .map(|item| item.item_focus_handle(cx))
+            })
+            .expect("Terminal panel should contain a terminal");
+
+        window_handle
+            .update(cx, |_, window, cx| terminal_focus.focus(window, cx))
+            .expect("Failed to focus panel terminal");
+        cx.run_until_parked();
+
+        window_handle
+            .update(cx, |_, window, cx| {
+                terminal_focus.dispatch_action(&terminal::ToggleViMode, window, cx)
+            })
+            .expect("Failed to enter terminal vi mode");
+        cx.run_until_parked();
+
+        let terminal = terminal_panel
+            .read_with(cx, |panel, cx| {
+                panel
+                    .active_pane
+                    .read(cx)
+                    .active_item()
+                    .and_then(|item| item.downcast::<TerminalView>())
+                    .map(|terminal_view| terminal_view.read(cx).terminal().clone())
+            })
+            .expect("Terminal panel should contain a terminal view");
+        let cursor_before_maximize = terminal.read_with(cx, |terminal, _| {
+            let content = terminal.last_content();
+            (
+                content
+                    .cursor
+                    .point
+                    .line
+                    .saturating_add(i32::try_from(content.display_offset).unwrap_or(i32::MAX)),
+                content.cursor.point.column,
+                content.terminal_bounds,
+            )
+        });
+
+        cx.simulate_keystrokes(window_handle.into(), "space w m");
+        window_handle
+            .update(cx, |multi_workspace, window, cx| {
+                multi_workspace.workspace().update(cx, |workspace, cx| {
+                    assert!(terminal_focus.contains_focused(window, cx));
+                    assert!(
+                        workspace
+                            .dock_at_position(DockPosition::Bottom)
+                            .read(cx)
+                            .is_open()
+                    );
+                    assert!(workspace.is_pane_maximized());
+                    assert!(terminal_focus.contains_focused(window, cx));
+                    assert!(
+                        workspace
+                            .dock_at_position(DockPosition::Bottom)
+                            .read(cx)
+                            .is_open()
+                    );
+                });
+            })
+            .expect("Failed to maximize panel terminal");
+        cx.run_until_parked();
+
+        let cursor_after_maximize = terminal.read_with(cx, |terminal, _| {
+            let content = terminal.last_content();
+            (
+                content
+                    .cursor
+                    .point
+                    .line
+                    .saturating_add(i32::try_from(content.display_offset).unwrap_or(i32::MAX)),
+                content.cursor.point.column,
+                content.terminal_bounds,
+            )
+        });
+        assert_eq!(
+            cursor_after_maximize.0, cursor_before_maximize.0,
+            "Terminal vi cursor should stay on the same viewport line"
+        );
+        assert_eq!(
+            cursor_after_maximize.1, cursor_before_maximize.1,
+            "Terminal vi cursor should stay in the same viewport column"
+        );
+        assert!(
+            cursor_after_maximize.2.height() > cursor_before_maximize.2.height(),
+            "Promoted terminal should grow to fill the editor region"
+        );
+
+        cx.simulate_keystrokes(window_handle.into(), "space w m");
+        window_handle
+            .update(cx, |multi_workspace, window, cx| {
+                multi_workspace.workspace().update(cx, |workspace, cx| {
+                    assert!(terminal_focus.contains_focused(window, cx));
+                    assert!(!workspace.is_pane_maximized());
+                    assert!(terminal_focus.contains_focused(window, cx));
+                    assert!(
+                        workspace
+                            .dock_at_position(DockPosition::Bottom)
+                            .read(cx)
+                            .is_open()
+                    );
+                });
+            })
+            .expect("Failed to restore panel terminal");
     }
 
     #[gpui::test]

@@ -1655,6 +1655,19 @@ impl Terminal {
                 let new_bounds = normalize_terminal_bounds(new_bounds);
                 trace!("Resizing: new_bounds={new_bounds:?}");
 
+                let vi_cursor_viewport_point = self.vi_mode_enabled.then(|| {
+                    let display_offset =
+                        i32::try_from(self.last_content.display_offset).unwrap_or(i32::MAX);
+                    Point::new(
+                        self.last_content
+                            .cursor
+                            .point
+                            .line
+                            .saturating_add(display_offset),
+                        self.last_content.cursor.point.column,
+                    )
+                });
+
                 let columns_changed =
                     self.last_content.terminal_bounds.num_columns() != new_bounds.num_columns();
                 self.last_content.terminal_bounds = new_bounds;
@@ -1664,6 +1677,18 @@ impl Terminal {
                 }
 
                 resize(term, new_bounds);
+                if let Some(viewport_point) = vi_cursor_viewport_point {
+                    let cursor_point = vi_cursor_point_after_resize(
+                        viewport_point,
+                        display_offset(term),
+                        new_bounds,
+                    );
+                    vi_goto_point(term, cursor_point);
+                    if let Some(selection_head) = update_selection_to_vi_cursor(term) {
+                        self.selection_head = Some(selection_head);
+                        cx.emit(Event::SelectionsChanged);
+                    }
+                }
                 if columns_changed {
                     self.reset_cwd_history();
                 }
@@ -3093,6 +3118,25 @@ impl Terminal {
     }
 }
 
+fn vi_cursor_point_after_resize(
+    viewport_point: Point,
+    display_offset: usize,
+    bounds: TerminalBounds,
+) -> Point {
+    let maximum_line = bounds.num_lines().saturating_sub(1);
+    let viewport_line = usize::try_from(viewport_point.line)
+        .unwrap_or_default()
+        .min(maximum_line);
+    let viewport_line = i32::try_from(viewport_line).unwrap_or(i32::MAX);
+    let display_offset = i32::try_from(display_offset).unwrap_or(i32::MAX);
+    let maximum_column = bounds.num_columns().saturating_sub(1);
+
+    Point::new(
+        viewport_line.saturating_sub(display_offset),
+        viewport_point.column.min(maximum_column),
+    )
+}
+
 const TASK_DELIMITER: &str = "⏵ ";
 fn task_summary(task: &TaskState, exit_status: Option<ExitStatus>) -> (bool, String, String) {
     let escaped_full_label = task
@@ -4392,6 +4436,31 @@ mod tests {
             terminal.events.back(),
             Some(InternalEvent::Resize(_))
         ));
+    }
+
+    #[test]
+    fn test_vi_cursor_stays_at_viewport_position_after_resize() {
+        let bounds = TerminalBounds {
+            cell_width: Pixels::from(10.),
+            line_height: Pixels::from(10.),
+            bounds: bounds(
+                GpuiPoint::default(),
+                size(Pixels::from(100.), Pixels::from(200.)),
+            ),
+        };
+
+        assert_eq!(
+            vi_cursor_point_after_resize(Point::new(3, 4), 0, bounds),
+            Point::new(3, 4)
+        );
+        assert_eq!(
+            vi_cursor_point_after_resize(Point::new(3, 40), 5, bounds),
+            Point::new(-2, 9)
+        );
+        assert_eq!(
+            vi_cursor_point_after_resize(Point::new(40, 4), 0, bounds),
+            Point::new(19, 4)
+        );
     }
 
     fn get_cells(size: TerminalBounds, rng: &mut StdRng) -> Vec<Vec<char>> {

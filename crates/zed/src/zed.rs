@@ -5586,6 +5586,7 @@ mod tests {
             "Editor VimControl vim_mode=normal",
         ];
         let special_terminal = ["Workspace", "Pane SpecialBuffer", "Terminal"];
+        let center_terminal = ["Workspace", "Pane SpecialBuffer", "Terminal vi_mode"];
         let normal_notebook = [
             "Workspace",
             "Pane NormalBuffer",
@@ -5612,7 +5613,7 @@ mod tests {
             "Workspace",
             "Dock PersistentPanel TerminalPanel",
             "Pane SpecialBuffer",
-            "Terminal",
+            "Terminal vi_mode",
         ];
         let picker_editor = ["Workspace", "Picker", "Editor VimControl vim_mode=normal"];
         let context_menu = [
@@ -5679,6 +5680,28 @@ mod tests {
             vim_bindings_for(&["space", "b", "k"], &normal_notebook, cx).first(),
             Some(&"pane::CloseActiveItem".to_string())
         );
+        assert_eq!(
+            vim_bindings_for(&["space", "w", "m"], &normal_editor, cx).first(),
+            Some(&"workspace::ToggleEditorZoom".to_string())
+        );
+        assert_eq!(
+            vim_bindings_for(&["space", "w", "m"], &special_editor, cx).first(),
+            Some(&"workspace::ToggleEditorZoom".to_string())
+        );
+        assert_eq!(
+            vim_bindings_for(&["space", "w", "m"], &center_terminal, cx).first(),
+            Some(&"workspace::ToggleEditorZoom".to_string())
+        );
+        assert!(
+            !vim_bindings_for(&["space", "w", "m"], &persistent_panel, cx)
+                .iter()
+                .any(|action| action == "workspace::ToggleEditorZoom")
+        );
+        assert!(
+            !vim_bindings_for(&["space", "w", "m"], &persistent_panel_editor, cx)
+                .iter()
+                .any(|action| action == "workspace::ToggleEditorZoom")
+        );
         assert!(
             !vim_bindings_for(&["q"], &special_terminal, cx)
                 .iter()
@@ -5690,6 +5713,10 @@ mod tests {
                 .any(|action| {
                     action == "workspace::CloseActiveDock" || action == "pane::CloseActiveItem"
                 })
+        );
+        assert_eq!(
+            vim_bindings_for(&["space", "w", "m"], &terminal_panel, cx).first(),
+            Some(&"workspace::ToggleEditorZoom".to_string())
         );
 
         let special_editor_insert = [
@@ -5713,6 +5740,11 @@ mod tests {
             !vim_bindings_for(&["q"], &persistent_panel_editor_insert, cx)
                 .iter()
                 .any(|action| action == "workspace::CloseActiveDock")
+        );
+        assert!(
+            !vim_bindings_for(&["space", "w", "m"], &persistent_panel_editor_insert, cx)
+                .iter()
+                .any(|action| action == "workspace::ToggleEditorZoom")
         );
     }
 

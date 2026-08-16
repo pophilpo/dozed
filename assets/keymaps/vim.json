@@ -1235,6 +1235,24 @@
     },
   },
   {
+    "context": "((NormalBuffer > vim_mode == normal) || (SpecialBuffer > vim_mode == normal)) && !PersistentPanel",
+    "bindings": {
+      "space w m": "workspace::ToggleEditorZoom",
+    },
+  },
+  {
+    "context": "Terminal && vi_mode && !PersistentPanel && !menu",
+    "bindings": {
+      "space w m": "workspace::ToggleEditorZoom",
+    },
+  },
+  {
+    "context": "(PersistentPanel > Terminal && vi_mode) && !menu",
+    "bindings": {
+      "space w m": "workspace::ToggleEditorZoom",
+    },
+  },
+  {
     "context": "((SpecialBuffer && !Editor) || (SpecialBuffer > vim_mode == normal)) && !Terminal",
     "bindings": {
       "q": "pane::CloseActiveItem",

@@ -65,9 +65,10 @@ use gpui::{
     Action, AnyEntity, AnyView, AnyWeakView, App, AsyncApp, AsyncWindowContext, Axis, Bounds,
     Context, CursorStyle, Decorations, DragMoveEvent, Entity, EntityId, EventEmitter, FocusHandle,
     Focusable, Global, HitboxBehavior, Hsla, KeyContext, Keystroke, ManagedView, MouseButton,
-    PathPromptOptions, Point, PromptLevel, Render, ResizeEdge, Size, Stateful, Subscription,
-    SystemWindowTabController, Task, TaskExt, Tiling, WeakEntity, WindowBounds, WindowHandle,
-    WindowId, WindowOptions, actions, canvas, point, relative, size, transparent_black,
+    PathPromptOptions, Point, PromptLevel, Render, ResizeEdge, Size, Stateful, StyleRefinement,
+    Subscription, SystemWindowTabController, Task, TaskExt, Tiling, WeakEntity, WindowBounds,
+    WindowHandle, WindowId, WindowOptions, actions, canvas, point, relative, size,
+    transparent_black,
 };
 pub use history_manager::*;
 pub use item::{
@@ -8192,8 +8193,17 @@ impl Workspace {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        let target_pane = self
+            .all_docks()
+            .into_iter()
+            .find_map(|dock| {
+                let pane = dock.read(cx).active_panel()?.pane(cx)?;
+                pane.read(cx).has_focus(window, cx).then_some(pane.clone())
+            })
+            .unwrap_or_else(|| self.active_pane.clone());
+
         if self.zoomed.is_some() {
-            self.active_pane.update(cx, |pane, cx| {
+            target_pane.update(cx, |pane, cx| {
                 pane.set_zoomed(false, cx);
             });
             self.zoomed = None;
@@ -8202,14 +8212,16 @@ impl Workspace {
         }
 
         if let Some(maximized) = self.maximized_pane.take() {
-            if maximized.upgrade().as_ref() == Some(&self.active_pane) {
+            if maximized.upgrade().as_ref() == Some(&target_pane) {
                 cx.notify();
                 return;
             }
         }
 
-        self.maximized_pane = Some(self.active_pane.downgrade());
-        window.focus(&self.active_pane.focus_handle(cx), cx);
+        self.maximized_pane = Some(target_pane.downgrade());
+        if !target_pane.read(cx).has_focus(window, cx) {
+            window.focus(&target_pane.focus_handle(cx), cx);
+        }
         cx.notify();
     }
 
@@ -8234,6 +8246,16 @@ impl Workspace {
         cx: &mut App,
     ) -> Option<Stateful<Div>> {
         if self.zoomed_position == Some(position) {
+            return None;
+        }
+
+        let maximized_pane = self.maximized_pane.as_ref().and_then(WeakEntity::upgrade);
+        let dock_contains_maximized_pane = dock
+            .read(cx)
+            .active_panel()
+            .and_then(|panel| panel.pane(cx))
+            .is_some_and(|pane| Some(pane) == maximized_pane);
+        if dock_contains_maximized_pane {
             return None;
         }
 
@@ -8469,6 +8491,13 @@ impl Workspace {
         window: &mut Window,
         cx: &mut App,
     ) -> impl IntoElement {
+        let maximized_external_pane = self
+            .maximized_pane
+            .as_ref()
+            .and_then(WeakEntity::upgrade)
+            .filter(|pane| !self.panes.contains(pane));
+        let has_maximized_external_pane = maximized_external_pane.is_some();
+
         div()
             .id("editor-region")
             .role(gpui::Role::Main)
@@ -8477,13 +8506,20 @@ impl Workspace {
                 this.track_focus(&self.region_focus_handles.editor)
             })
             .size_full()
-            .child(self.center.render(
-                self.zoomed.as_ref(),
-                self.maximized_pane.as_ref(),
-                render_cx,
-                window,
-                cx,
-            ))
+            .when_some(maximized_external_pane, |this, pane| {
+                this.child(
+                    AnyView::from(pane).cached(StyleRefinement::default().v_flex().size_full()),
+                )
+            })
+            .when(!has_maximized_external_pane, |this| {
+                this.child(self.center.render(
+                    self.zoomed.as_ref(),
+                    self.maximized_pane.as_ref(),
+                    render_cx,
+                    window,
+                    cx,
+                ))
+            })
     }
 
     pub fn for_window(window: &Window, cx: &App) -> Option<Entity<Workspace>> {
