@@ -22,6 +22,9 @@ shape. Every surface has one role:
 - In Vim normal mode, the local quit command closes special buffers,
   transient surfaces, and navigational persistent panels. Normal buffers use
   the buffer-kill command instead.
+- Next- and previous-buffer commands cycle tabs in the focused pane. Closing a
+  window joins its tabs into an adjacent pane instead of killing them. Killing
+  a buffer and closing a window remain separate operations.
 - Pickers and context menus follow the transient local-quit rule even when they
   are not hosted by the modal layer.
 - Mouse, Vim, and command-driven interaction follow the same lifecycle rules.

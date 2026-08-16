@@ -5680,6 +5680,72 @@ mod tests {
             vim_bindings_for(&["space", "b", "k"], &normal_notebook, cx).first(),
             Some(&"pane::CloseActiveItem".to_string())
         );
+        for context in [
+            normal_editor.as_slice(),
+            special_view.as_slice(),
+            normal_notebook.as_slice(),
+            center_terminal.as_slice(),
+            terminal_panel.as_slice(),
+        ] {
+            assert_eq!(
+                vim_bindings_for(&["space", "b", "n"], context, cx).first(),
+                Some(&"pane::ActivateNextItem".to_string())
+            );
+            assert_eq!(
+                vim_bindings_for(&["space", "b", "p"], context, cx).first(),
+                Some(&"pane::ActivatePreviousItem".to_string())
+            );
+        }
+        assert!(
+            !vim_bindings_for(&["space", "b", "k"], &special_view, cx)
+                .iter()
+                .any(|action| action == "pane::CloseActiveItem")
+        );
+        assert!(
+            !vim_bindings_for(&["space", "b", "k"], &center_terminal, cx)
+                .iter()
+                .any(|action| action == "pane::CloseActiveItem")
+        );
+        for context in [
+            normal_editor.as_slice(),
+            special_view.as_slice(),
+            normal_notebook.as_slice(),
+            center_terminal.as_slice(),
+        ] {
+            assert_eq!(
+                vim_bindings_for(&["space", "w", "q"], context, cx).first(),
+                Some(&"pane::JoinIntoNext".to_string())
+            );
+            assert!(
+                !vim_bindings_for(&["space", "w", "q"], context, cx)
+                    .iter()
+                    .any(|action| action == "pane::CloseActiveItem")
+            );
+        }
+        assert_eq!(
+            vim_bindings_for(&["ctrl-w", "q"], &normal_editor, cx).first(),
+            Some(&"pane::JoinIntoNext".to_string())
+        );
+        assert_eq!(
+            vim_bindings_for(&["ctrl-w", "c"], &center_terminal, cx).first(),
+            Some(&"pane::JoinIntoNext".to_string())
+        );
+        assert_eq!(
+            vim_bindings_for(&["space", "w", "q"], &persistent_panel, cx).first(),
+            Some(&"workspace::CloseActiveDock".to_string())
+        );
+        assert_eq!(
+            vim_bindings_for(&["space", "w", "q"], &persistent_panel_editor, cx).first(),
+            Some(&"workspace::CloseActiveDock".to_string())
+        );
+        assert_eq!(
+            vim_bindings_for(&["space", "w", "q"], &terminal_panel, cx).first(),
+            Some(&"workspace::CloseActiveDock".to_string())
+        );
+        assert_eq!(
+            vim_bindings_for(&["ctrl-w", "q"], &terminal_panel, cx).first(),
+            Some(&"workspace::CloseActiveDock".to_string())
+        );
         assert_eq!(
             vim_bindings_for(&["space", "w", "m"], &normal_editor, cx).first(),
             Some(&"workspace::ToggleEditorZoom".to_string())
