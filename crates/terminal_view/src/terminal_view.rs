@@ -1284,6 +1284,10 @@ impl TerminalView {
         self.clear_bell(cx);
         self.pause_cursor_blinking(window, cx);
 
+        if window.pending_input_keystrokes().is_some() {
+            return;
+        }
+
         if self.process_keystroke(&event.keystroke, cx) {
             cx.stop_propagation();
         }
@@ -2337,6 +2341,42 @@ mod tests {
             vec![vec![0x11]],
             "ctrl-q in a focused terminal should send 0x11 to the PTY, not trigger zed::Quit",
         );
+    }
+
+    #[gpui::test]
+    async fn pending_keybinding_does_not_move_terminal_vi_cursor(cx: &mut TestAppContext) {
+        let (project, _workspace, window_handle) = init_test_with_window(cx).await;
+        cx.update(|cx| {
+            cx.bind_keys([gpui::KeyBinding::new(
+                "space w m",
+                Copy,
+                Some("Terminal && vi_mode"),
+            )])
+        });
+        let (_pane, terminal, terminal_view) =
+            add_display_only_terminal(&project, window_handle, true, cx);
+
+        let mut cx = VisualTestContext::from_window(window_handle.into(), cx);
+        cx.update(|window, cx| {
+            let _ = window.draw(cx);
+            terminal.update(cx, |terminal, cx| {
+                terminal.write_output(b"alpha beta", cx);
+                terminal.sync(window, cx);
+            });
+            terminal_view.update(cx, |terminal_view, cx| {
+                terminal_view.toggle_vi_mode(&ToggleViMode, window, cx)
+            });
+            terminal.update(cx, |terminal, cx| terminal.sync(window, cx));
+        });
+
+        let cursor_before = terminal.read_with(&cx, |terminal, _| terminal.last_content.cursor);
+        cx.simulate_keystrokes("space w m");
+        cx.update(|window, cx| {
+            terminal.update(cx, |terminal, cx| terminal.sync(window, cx));
+        });
+        let cursor_after = terminal.read_with(&cx, |terminal, _| terminal.last_content.cursor);
+
+        assert_eq!(cursor_after, cursor_before);
     }
 
     // Working directory calculation tests

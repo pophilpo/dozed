@@ -4,6 +4,8 @@ use gpui::{
 };
 use ui::prelude::*;
 
+use crate::surface::SurfaceFocusRestore;
+
 #[derive(Debug)]
 pub enum DismissDecision {
     Dismiss(bool),
@@ -65,6 +67,7 @@ pub trait ModalView: ManagedView {
 }
 
 trait ModalViewHandle {
+    fn surface_role(&self) -> crate::SurfaceRole;
     fn on_before_dismiss(&mut self, window: &mut Window, cx: &mut App) -> DismissDecision;
     fn view(&self) -> AnyView;
     fn focus_handle(&self, cx: &App) -> FocusHandle;
@@ -74,6 +77,10 @@ trait ModalViewHandle {
 }
 
 impl<V: ModalView> ModalViewHandle for Entity<V> {
+    fn surface_role(&self) -> crate::SurfaceRole {
+        crate::SurfaceRole::Transient
+    }
+
     fn on_before_dismiss(&mut self, window: &mut Window, cx: &mut App) -> DismissDecision {
         self.update(cx, |this, cx| this.on_before_dismiss(window, cx))
     }
@@ -104,8 +111,14 @@ impl<V: ModalView> ModalViewHandle for Entity<V> {
 pub struct ActiveModal {
     modal: Box<dyn ModalViewHandle>,
     _subscriptions: [Subscription; 2],
-    previous_focus_handle: Option<FocusHandle>,
+    focus_restore: SurfaceFocusRestore,
+    fallback_focus_handle: WeakFocusHandle,
     focus_handle: FocusHandle,
+}
+
+struct StashedModal {
+    modal: Box<dyn ModalViewHandle>,
+    fallback_focus_handle: WeakFocusHandle,
 }
 
 pub struct ModalLayer {
@@ -113,7 +126,7 @@ pub struct ModalLayer {
     // Kept alive (hidden) rather than dropped on dismissal so `ReopenLastPicker`
     // can reveal it again with its exact prior state. Left intact across
     // non-reopenable modals (e.g. the command palette), which may trigger the reopen.
-    stashed_modal: Option<Box<dyn ModalViewHandle>>,
+    stashed_modal: Option<StashedModal>,
     // Set when a reveal was requested while another modal was still active (e.g. the
     // which-key popup that is dismissed only after the reopen action fires). The reveal
     // then happens once that modal closes, so it doesn't matter whether the triggering
@@ -149,8 +162,13 @@ impl ModalLayer {
     /// If closing the current modal fails (e.g., due to `on_before_dismiss` returning
     /// `DismissDecision::Dismiss(false)` or `DismissDecision::Pending`), the new modal
     /// will not be shown.
-    pub fn toggle_modal<V, B>(&mut self, window: &mut Window, cx: &mut Context<Self>, build_view: B)
-    where
+    pub fn toggle_modal<V, B>(
+        &mut self,
+        fallback_focus_handle: WeakFocusHandle,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+        build_view: B,
+    ) where
         V: ModalView,
         B: FnOnce(&mut Window, &mut Context<V>) -> V,
     {
@@ -165,7 +183,7 @@ impl ModalLayer {
             }
         }
         let new_modal = cx.new(|cx| build_view(window, cx));
-        self.show_modal(Box::new(new_modal), window, cx);
+        self.show_modal(Box::new(new_modal), fallback_focus_handle, window, cx);
         cx.emit(ModalOpenedEvent);
     }
 
@@ -174,6 +192,7 @@ impl ModalLayer {
     fn show_modal(
         &mut self,
         modal: Box<dyn ModalViewHandle>,
+        fallback_focus_handle: WeakFocusHandle,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
@@ -190,7 +209,8 @@ impl ModalLayer {
                     }
                 }),
             ],
-            previous_focus_handle: window.focused(cx),
+            focus_restore: SurfaceFocusRestore::capture(window, cx),
+            fallback_focus_handle,
             focus_handle,
         });
         cx.defer_in(window, move |_, window, cx| {
@@ -211,10 +231,14 @@ impl ModalLayer {
             self.reveal_stash_when_free = true;
             return false;
         }
-        let Some(modal) = self.stashed_modal.take() else {
+        let Some(stashed_modal) = self.stashed_modal.take() else {
             return false;
         };
-        self.show_modal(modal, window, cx);
+        let fallback_focus_handle = window
+            .focused(cx)
+            .map(|focus_handle| focus_handle.downgrade())
+            .unwrap_or(stashed_modal.fallback_focus_handle);
+        self.show_modal(stashed_modal.modal, fallback_focus_handle, window, cx);
         cx.emit(ModalOpenedEvent);
         true
     }
@@ -246,14 +270,20 @@ impl ModalLayer {
         }
 
         if let Some(active_modal) = self.active_modal.take() {
-            let reopenable = focus_handle_is_reopenable(&active_modal.modal.focus_handle(cx), cx);
-            if let Some(previous_focus) = active_modal.previous_focus_handle
-                && active_modal.focus_handle.contains_focused(window, cx)
-            {
-                previous_focus.focus(window, cx);
-            }
+            let modal_focus_handle = active_modal.modal.focus_handle(cx);
+            let reopenable = focus_handle_is_reopenable(&modal_focus_handle, cx);
+            let fallback_focus_handle = active_modal.fallback_focus_handle.upgrade();
+            active_modal.focus_restore.restore(
+                &modal_focus_handle,
+                fallback_focus_handle.as_ref(),
+                window,
+                cx,
+            );
             if reopenable {
-                self.stashed_modal = Some(active_modal.modal);
+                self.stashed_modal = Some(StashedModal {
+                    modal: active_modal.modal,
+                    fallback_focus_handle: active_modal.fallback_focus_handle,
+                });
             }
             cx.notify();
         }
@@ -279,6 +309,12 @@ impl ModalLayer {
     pub fn has_active_modal(&self) -> bool {
         self.active_modal.is_some()
     }
+
+    pub fn active_surface_role(&self) -> Option<crate::SurfaceRole> {
+        self.active_modal
+            .as_ref()
+            .map(|active_modal| active_modal.modal.surface_role())
+    }
 }
 
 impl Render for ModalLayer {
@@ -292,6 +328,7 @@ impl Render for ModalLayer {
         }
 
         div()
+            .key_context(crate::SurfaceRole::Transient.key_context())
             .absolute()
             .size_full()
             .inset_0()
@@ -307,6 +344,9 @@ impl Render for ModalLayer {
                     this.hide_modal(window, cx);
                 }),
             )
+            .on_action(cx.listener(|this, _: &menu::Cancel, window, cx| {
+                this.hide_modal(window, cx);
+            }))
             .child(
                 v_flex()
                     .h(px(0.0))

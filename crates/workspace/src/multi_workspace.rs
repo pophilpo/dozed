@@ -28,7 +28,7 @@ use crate::open_remote_project_with_existing_connection;
 use crate::{
     CloseIntent, CloseWindow, DockPosition, Event as WorkspaceEvent, Item, ModalView, OpenMode,
     Panel, Workspace, WorkspaceId, client_side_decorations,
-    persistence::model::MultiWorkspaceState,
+    persistence::model::MultiWorkspaceState, surface::SurfaceFocusRestore,
 };
 
 actions!(
@@ -108,6 +108,8 @@ pub enum SidebarEvent {
 }
 
 pub trait Sidebar: Focusable + Render + EventEmitter<SidebarEvent> + Sized {
+    const SURFACE_ROLE: crate::SurfaceRole = crate::SurfaceRole::PersistentPanel;
+
     fn width(&self, cx: &App) -> Pixels;
     fn set_width(&mut self, width: Option<Pixels>, cx: &mut Context<Self>);
     fn has_notifications(&self, cx: &App) -> bool;
@@ -135,6 +137,7 @@ pub trait Sidebar: Focusable + Render + EventEmitter<SidebarEvent> + Sized {
 }
 
 pub trait SidebarHandle: 'static + Send + Sync {
+    fn surface_role(&self) -> crate::SurfaceRole;
     fn width(&self, cx: &App) -> Pixels;
     fn set_width(&self, width: Option<Pixels>, cx: &mut App);
     fn focus_handle(&self, cx: &App) -> FocusHandle;
@@ -160,6 +163,10 @@ impl Render for DraggedSidebar {
 }
 
 impl<T: Sidebar> SidebarHandle for Entity<T> {
+    fn surface_role(&self) -> crate::SurfaceRole {
+        T::SURFACE_ROLE
+    }
+
     fn width(&self, cx: &App) -> Pixels {
         self.read(cx).width(cx)
     }
@@ -268,7 +275,7 @@ pub struct MultiWorkspace {
     pending_removal_tasks: Vec<Task<()>>,
     _serialize_task: Option<Task<()>>,
     _subscriptions: Vec<Subscription>,
-    previous_focus_handle: Option<FocusHandle>,
+    sidebar_focus_restore: Option<SurfaceFocusRestore>,
 }
 
 impl EventEmitter<MultiWorkspaceEvent> for MultiWorkspace {}
@@ -318,7 +325,7 @@ impl MultiWorkspace {
             pending_removal_tasks: Vec::new(),
             _serialize_task: None,
             _subscriptions: vec![release_subscription, quit_subscription],
-            previous_focus_handle: None,
+            sidebar_focus_restore: None,
         }
     }
 
@@ -359,7 +366,7 @@ impl MultiWorkspace {
         if self.sidebar_open() {
             self.close_sidebar(window, cx);
         } else {
-            self.previous_focus_handle = window.focused(cx);
+            self.sidebar_focus_restore = Some(SurfaceFocusRestore::capture(window, cx));
             self.open_sidebar(cx);
             if let Some(sidebar) = &self.sidebar {
                 sidebar.prepare_for_focus(window, cx);
@@ -382,16 +389,16 @@ impl MultiWorkspace {
                 .is_some_and(|s| s.focus_handle(cx).contains_focused(window, cx));
 
             if sidebar_is_focused {
-                self.restore_previous_focus(false, window, cx);
+                self.restore_sidebar_focus(false, window, cx);
             } else {
-                self.previous_focus_handle = window.focused(cx);
+                self.sidebar_focus_restore = Some(SurfaceFocusRestore::capture(window, cx));
                 if let Some(sidebar) = &self.sidebar {
                     sidebar.prepare_for_focus(window, cx);
                     sidebar.focus(window, cx);
                 }
             }
         } else {
-            self.previous_focus_handle = window.focused(cx);
+            self.sidebar_focus_restore = Some(SurfaceFocusRestore::capture(window, cx));
             self.open_sidebar(cx);
             if let Some(sidebar) = &self.sidebar {
                 sidebar.prepare_for_focus(window, cx);
@@ -445,26 +452,41 @@ impl MultiWorkspace {
             .as_ref()
             .is_some_and(|s| s.focus_handle(cx).contains_focused(window, cx));
         if sidebar_has_focus {
-            self.restore_previous_focus(true, window, cx);
+            self.restore_sidebar_focus(true, window, cx);
         } else {
-            self.previous_focus_handle.take();
+            self.sidebar_focus_restore.take();
         }
         self.serialize(cx);
         cx.notify();
     }
 
-    fn restore_previous_focus(&mut self, clear: bool, window: &mut Window, cx: &mut Context<Self>) {
-        let focus_handle = if clear {
-            self.previous_focus_handle.take()
-        } else {
-            self.previous_focus_handle.clone()
+    fn restore_sidebar_focus(&mut self, clear: bool, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(sidebar_focus_handle) = self
+            .sidebar
+            .as_ref()
+            .map(|sidebar| sidebar.focus_handle(cx))
+        else {
+            self.sidebar_focus_restore.take();
+            return;
         };
+        let fallback_focus_handle = self.active_workspace_focus_handle(window, cx);
 
-        if let Some(previous_focus) = focus_handle {
-            previous_focus.focus(window, cx);
-        } else {
-            let pane = self.workspace().read(cx).active_pane().clone();
-            window.focus(&pane.read(cx).focus_handle(cx), cx);
+        if clear {
+            if let Some(focus_restore) = self.sidebar_focus_restore.take() {
+                focus_restore.restore(
+                    &sidebar_focus_handle,
+                    Some(&fallback_focus_handle),
+                    window,
+                    cx,
+                );
+            }
+        } else if let Some(focus_restore) = &self.sidebar_focus_restore {
+            focus_restore.restore(
+                &sidebar_focus_handle,
+                Some(&fallback_focus_handle),
+                window,
+                cx,
+            );
         }
     }
 
@@ -1235,6 +1257,15 @@ impl MultiWorkspace {
             return;
         }
 
+        if self.sidebar_open()
+            && self
+                .sidebar
+                .as_ref()
+                .is_some_and(|sidebar| sidebar.surface_role() == crate::SurfaceRole::Transient)
+        {
+            self.sidebar_focus_restore.take();
+        }
+
         let old_active_workspace = self.workspace().clone();
         if !self.active_workspace_is_retained() {
             let key = old_active_workspace.read(cx).project_group_key(cx);
@@ -1376,34 +1407,12 @@ impl MultiWorkspace {
     }
 
     pub fn focus_active_workspace(&self, window: &mut Window, cx: &mut App) {
-        // If a dock panel is zoomed, focus it instead of the center pane.
-        // Otherwise, focusing the center pane triggers dismiss_zoomed_items_to_reveal
-        // which closes the zoomed dock. An empty project lands in its open panel
-        // rather than leaving focus in an empty center pane.
-        let focus_handle = {
-            let workspace = self.workspace().read(cx);
-            let mut target = None;
-            for dock in workspace.all_docks() {
-                let dock = dock.read(cx);
-                if dock.is_open() {
-                    if let Some(panel) = dock.active_panel() {
-                        if panel.is_zoomed(window, cx)
-                            || (workspace.active_item(cx).is_none() && target.is_none())
-                        {
-                            target = Some(panel.activation_focus_handle(cx));
-                            if panel.is_zoomed(window, cx) {
-                                break;
-                            }
-                        }
-                    }
-                }
-            }
-            target.unwrap_or_else(|| {
-                let pane = workspace.active_pane().clone();
-                pane.read(cx).focus_handle(cx)
-            })
-        };
+        let focus_handle = self.active_workspace_focus_handle(window, cx);
         window.focus(&focus_handle, cx);
+    }
+
+    fn active_workspace_focus_handle(&self, window: &Window, cx: &App) -> FocusHandle {
+        self.workspace().read(cx).surface_focus_fallback(window, cx)
     }
 
     pub fn panel<T: Panel>(&self, cx: &App) -> Option<Entity<T>> {

@@ -549,7 +549,7 @@ impl Member {
                     };
                 }
 
-                let is_maximized = if let Some(maximized) = maximized {
+                if let Some(maximized) = maximized {
                     if maximized.upgrade().as_ref() != Some(pane) {
                         return PaneRenderResult {
                             element: div().into_any(),
@@ -558,48 +558,32 @@ impl Member {
                             decorated_pane_ix: None,
                         };
                     }
-                    true
-                } else {
-                    false
-                };
+                }
 
                 let decoration = render_cx.decorate(pane, cx);
                 let is_active = pane == render_cx.active_pane();
-
-                let pane = div()
-                    .relative()
-                    .size_full()
-                    .when(is_maximized, |this| {
-                        this.bg(cx.theme().colors().background)
-                            .border_1()
-                            .border_color(cx.theme().colors().border)
-                            .shadow_lg()
-                            .overflow_hidden()
-                    })
-                    .child(
-                        AnyView::from(pane.clone())
-                            .cached(StyleRefinement::default().v_flex().size_full()),
-                    )
-                    .when_some(decoration.border, |this, color| {
-                        this.child(
-                            div()
-                                .absolute()
-                                .size_full()
-                                .left_0()
-                                .top_0()
-                                .border_2()
-                                .border_color(color),
-                        )
-                    })
-                    .children(decoration.status_box);
 
                 PaneRenderResult {
                     element: div()
                         .relative()
                         .flex_1()
                         .size_full()
-                        .when(is_maximized, |this| this.p_2())
-                        .child(pane)
+                        .child(
+                            AnyView::from(pane.clone())
+                                .cached(StyleRefinement::default().v_flex().size_full()),
+                        )
+                        .when_some(decoration.border, |this, color| {
+                            this.child(
+                                div()
+                                    .absolute()
+                                    .size_full()
+                                    .left_0()
+                                    .top_0()
+                                    .border_2()
+                                    .border_color(color),
+                            )
+                        })
+                        .children(decoration.status_box)
                         .into_any(),
                     contains_active_pane: is_active,
                     #[cfg(any(test, feature = "test-support"))]

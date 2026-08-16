@@ -5532,6 +5532,288 @@ mod tests {
         })
     }
 
+    fn vim_bindings_for(
+        keystrokes: &[&str],
+        contexts: &[&str],
+        cx: &mut TestAppContext,
+    ) -> Vec<String> {
+        cx.update(|cx| {
+            let bindings = match settings::KeymapFile::load_asset_allow_partial_failure(
+                "keymaps/vim.json",
+                cx,
+            ) {
+                Ok(bindings) => bindings,
+                Err(error) => panic!("failed to load the Vim keymap: {error}"),
+            };
+            let keystrokes = keystrokes
+                .iter()
+                .map(|keystroke| match gpui::Keystroke::parse(keystroke) {
+                    Ok(keystroke) => keystroke,
+                    Err(error) => panic!("failed to parse keystroke {keystroke:?}: {error}"),
+                })
+                .collect::<Vec<_>>();
+            let contexts = contexts
+                .iter()
+                .map(|context| match gpui::KeyContext::parse(context) {
+                    Ok(context) => context,
+                    Err(error) => panic!("failed to parse key context {context:?}: {error}"),
+                })
+                .collect::<Vec<_>>();
+
+            gpui::Keymap::new(bindings)
+                .bindings_for_input(&keystrokes, &contexts)
+                .0
+                .iter()
+                .map(|binding| binding.action().name().to_string())
+                .collect()
+        })
+    }
+
+    #[gpui::test]
+    fn test_vim_buffer_surface_bindings(cx: &mut TestAppContext) {
+        init_keymap_test(cx);
+
+        let normal_editor = [
+            "Workspace",
+            "Pane NormalBuffer",
+            "Editor VimControl vim_mode=normal",
+        ];
+        let special_view = ["Workspace", "Pane SpecialBuffer", "MarkdownPreview"];
+        let special_menu_view = ["Workspace", "Pane SpecialBuffer", "MarkdownPreview menu"];
+        let special_editor = [
+            "Workspace",
+            "Pane SpecialBuffer",
+            "Editor VimControl vim_mode=normal",
+        ];
+        let special_terminal = ["Workspace", "Pane SpecialBuffer", "Terminal"];
+        let center_terminal = ["Workspace", "Pane SpecialBuffer", "Terminal vi_mode"];
+        let normal_notebook = [
+            "Workspace",
+            "Pane NormalBuffer",
+            "NotebookEditor notebook_mode=command",
+        ];
+        let transient_view = ["Workspace", "TransientSurface", "Picker"];
+        let transient_editor = [
+            "Workspace",
+            "TransientSurface",
+            "Editor VimControl vim_mode=normal",
+        ];
+        let persistent_panel = [
+            "Workspace",
+            "Dock PersistentPanel ProjectPanel",
+            "ProjectPanel menu not_editing",
+        ];
+        let persistent_panel_editor = [
+            "Workspace",
+            "Dock PersistentPanel GitPanel",
+            "GitPanel",
+            "Editor VimControl vim_mode=normal",
+        ];
+        let terminal_panel = [
+            "Workspace",
+            "Dock PersistentPanel TerminalPanel",
+            "Pane SpecialBuffer",
+            "Terminal vi_mode",
+        ];
+        let picker_editor = ["Workspace", "Picker", "Editor VimControl vim_mode=normal"];
+        let context_menu = [
+            "Workspace",
+            "Pane NormalBuffer",
+            "Editor VimControl vim_mode=normal",
+            "menu ContextMenu",
+        ];
+        let editor_menu = [
+            "Workspace",
+            "Pane NormalBuffer",
+            "Editor VimControl vim_mode=normal menu",
+        ];
+
+        assert_eq!(
+            vim_bindings_for(&["q"], &normal_editor, cx).first(),
+            Some(&"vim::ToggleRecord".to_string())
+        );
+        assert_eq!(
+            vim_bindings_for(&["q"], &special_view, cx).first(),
+            Some(&"pane::CloseActiveItem".to_string())
+        );
+        assert_eq!(
+            vim_bindings_for(&["q"], &special_editor, cx).first(),
+            Some(&"pane::CloseActiveItem".to_string())
+        );
+        assert_eq!(
+            vim_bindings_for(&["q"], &special_menu_view, cx).first(),
+            Some(&"pane::CloseActiveItem".to_string())
+        );
+        assert_eq!(
+            vim_bindings_for(&["q"], &transient_editor, cx).first(),
+            Some(&"menu::Cancel".to_string())
+        );
+        assert_eq!(
+            vim_bindings_for(&["q"], &transient_view, cx).first(),
+            Some(&"menu::Cancel".to_string())
+        );
+        assert_eq!(
+            vim_bindings_for(&["q"], &picker_editor, cx).first(),
+            Some(&"menu::Cancel".to_string())
+        );
+        assert_eq!(
+            vim_bindings_for(&["q"], &context_menu, cx).first(),
+            Some(&"menu::Cancel".to_string())
+        );
+        assert_eq!(
+            vim_bindings_for(&["q"], &editor_menu, cx).first(),
+            Some(&"menu::Cancel".to_string())
+        );
+        assert_eq!(
+            vim_bindings_for(&["q"], &persistent_panel, cx).first(),
+            Some(&"workspace::CloseActiveDock".to_string())
+        );
+        assert_eq!(
+            vim_bindings_for(&["q"], &persistent_panel_editor, cx).first(),
+            Some(&"workspace::CloseActiveDock".to_string())
+        );
+        assert_eq!(
+            vim_bindings_for(&["space", "b", "k"], &normal_editor, cx).first(),
+            Some(&"pane::CloseActiveItem".to_string())
+        );
+        assert_eq!(
+            vim_bindings_for(&["space", "b", "k"], &normal_notebook, cx).first(),
+            Some(&"pane::CloseActiveItem".to_string())
+        );
+        for context in [
+            normal_editor.as_slice(),
+            special_view.as_slice(),
+            normal_notebook.as_slice(),
+            center_terminal.as_slice(),
+            terminal_panel.as_slice(),
+        ] {
+            assert_eq!(
+                vim_bindings_for(&["space", "b", "n"], context, cx).first(),
+                Some(&"pane::ActivateNextItem".to_string())
+            );
+            assert_eq!(
+                vim_bindings_for(&["space", "b", "p"], context, cx).first(),
+                Some(&"pane::ActivatePreviousItem".to_string())
+            );
+        }
+        assert!(
+            !vim_bindings_for(&["space", "b", "k"], &special_view, cx)
+                .iter()
+                .any(|action| action == "pane::CloseActiveItem")
+        );
+        assert!(
+            !vim_bindings_for(&["space", "b", "k"], &center_terminal, cx)
+                .iter()
+                .any(|action| action == "pane::CloseActiveItem")
+        );
+        for context in [
+            normal_editor.as_slice(),
+            special_view.as_slice(),
+            normal_notebook.as_slice(),
+            center_terminal.as_slice(),
+        ] {
+            assert_eq!(
+                vim_bindings_for(&["space", "w", "q"], context, cx).first(),
+                Some(&"pane::JoinIntoNext".to_string())
+            );
+            assert!(
+                !vim_bindings_for(&["space", "w", "q"], context, cx)
+                    .iter()
+                    .any(|action| action == "pane::CloseActiveItem")
+            );
+        }
+        assert_eq!(
+            vim_bindings_for(&["ctrl-w", "q"], &normal_editor, cx).first(),
+            Some(&"pane::JoinIntoNext".to_string())
+        );
+        assert_eq!(
+            vim_bindings_for(&["ctrl-w", "c"], &center_terminal, cx).first(),
+            Some(&"pane::JoinIntoNext".to_string())
+        );
+        assert_eq!(
+            vim_bindings_for(&["space", "w", "q"], &persistent_panel, cx).first(),
+            Some(&"workspace::CloseActiveDock".to_string())
+        );
+        assert_eq!(
+            vim_bindings_for(&["space", "w", "q"], &persistent_panel_editor, cx).first(),
+            Some(&"workspace::CloseActiveDock".to_string())
+        );
+        assert_eq!(
+            vim_bindings_for(&["space", "w", "q"], &terminal_panel, cx).first(),
+            Some(&"workspace::CloseActiveDock".to_string())
+        );
+        assert_eq!(
+            vim_bindings_for(&["ctrl-w", "q"], &terminal_panel, cx).first(),
+            Some(&"workspace::CloseActiveDock".to_string())
+        );
+        assert_eq!(
+            vim_bindings_for(&["space", "w", "m"], &normal_editor, cx).first(),
+            Some(&"workspace::ToggleEditorZoom".to_string())
+        );
+        assert_eq!(
+            vim_bindings_for(&["space", "w", "m"], &special_editor, cx).first(),
+            Some(&"workspace::ToggleEditorZoom".to_string())
+        );
+        assert_eq!(
+            vim_bindings_for(&["space", "w", "m"], &center_terminal, cx).first(),
+            Some(&"workspace::ToggleEditorZoom".to_string())
+        );
+        assert!(
+            !vim_bindings_for(&["space", "w", "m"], &persistent_panel, cx)
+                .iter()
+                .any(|action| action == "workspace::ToggleEditorZoom")
+        );
+        assert!(
+            !vim_bindings_for(&["space", "w", "m"], &persistent_panel_editor, cx)
+                .iter()
+                .any(|action| action == "workspace::ToggleEditorZoom")
+        );
+        assert!(
+            !vim_bindings_for(&["q"], &special_terminal, cx)
+                .iter()
+                .any(|action| action == "pane::CloseActiveItem")
+        );
+        assert!(
+            !vim_bindings_for(&["q"], &terminal_panel, cx)
+                .iter()
+                .any(|action| {
+                    action == "workspace::CloseActiveDock" || action == "pane::CloseActiveItem"
+                })
+        );
+        assert_eq!(
+            vim_bindings_for(&["space", "w", "m"], &terminal_panel, cx).first(),
+            Some(&"workspace::ToggleEditorZoom".to_string())
+        );
+
+        let special_editor_insert = [
+            "Workspace",
+            "Pane SpecialBuffer",
+            "Editor VimControl vim_mode=insert",
+        ];
+        assert!(
+            !vim_bindings_for(&["q"], &special_editor_insert, cx)
+                .iter()
+                .any(|action| action == "pane::CloseActiveItem")
+        );
+
+        let persistent_panel_editor_insert = [
+            "Workspace",
+            "Dock PersistentPanel GitPanel",
+            "GitPanel",
+            "Editor VimControl vim_mode=insert",
+        ];
+        assert!(
+            !vim_bindings_for(&["q"], &persistent_panel_editor_insert, cx)
+                .iter()
+                .any(|action| action == "workspace::CloseActiveDock")
+        );
+        assert!(
+            !vim_bindings_for(&["space", "w", "m"], &persistent_panel_editor_insert, cx)
+                .iter()
+                .any(|action| action == "workspace::ToggleEditorZoom")
+        );
+    }
+
     /// `editor::MoveDown` and `editor::MoveUp` propagate when the cursor doesn't move, which at the
     /// ends of a buffer let `ctrl-n` and `ctrl-p` fall through to the default bindings and open a
     /// new file / the file finder.

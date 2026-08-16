@@ -21,6 +21,7 @@ pub mod shared_screen;
 pub use shared_screen::SharedScreen;
 pub mod focus_follows_mouse;
 mod status_bar;
+mod surface;
 pub mod tasks;
 mod theme_preview;
 mod toast_layer;
@@ -41,6 +42,7 @@ pub use path_list::{PathList, SerializedPathList};
 pub use remote::{
     RemoteConnectionIdentity, remote_connection_identity, same_remote_connection_identity,
 };
+pub use surface::SurfaceRole;
 pub use toast_layer::{ToastAction, ToastLayer, ToastView};
 
 use anyhow::{Context as _, Result, anyhow};
@@ -63,9 +65,10 @@ use gpui::{
     Action, AnyEntity, AnyView, AnyWeakView, App, AsyncApp, AsyncWindowContext, Axis, Bounds,
     Context, CursorStyle, Decorations, DragMoveEvent, Entity, EntityId, EventEmitter, FocusHandle,
     Focusable, Global, HitboxBehavior, Hsla, KeyContext, Keystroke, ManagedView, MouseButton,
-    PathPromptOptions, Point, PromptLevel, Render, ResizeEdge, Size, Stateful, Subscription,
-    SystemWindowTabController, Task, TaskExt, Tiling, WeakEntity, WindowBounds, WindowHandle,
-    WindowId, WindowOptions, actions, canvas, point, relative, size, transparent_black,
+    PathPromptOptions, Point, PromptLevel, Render, ResizeEdge, Size, Stateful, StyleRefinement,
+    Subscription, SystemWindowTabController, Task, TaskExt, Tiling, WeakEntity, WindowBounds,
+    WindowHandle, WindowId, WindowOptions, actions, canvas, point, relative, size,
+    transparent_black,
 };
 pub use history_manager::*;
 pub use item::{
@@ -4323,6 +4326,7 @@ impl Workspace {
             dock.update(cx, |dock, cx| {
                 dock.set_open(false, window, cx);
             });
+            self.surface_focus_fallback(window, cx).focus(window, cx);
             return true;
         }
         false
@@ -8098,8 +8102,35 @@ impl Workspace {
     where
         B: FnOnce(&mut Window, &mut Context<V>) -> V,
     {
+        let fallback_focus_handle = self.surface_focus_fallback(window, cx).downgrade();
         self.modal_layer.update(cx, |modal_layer, cx| {
-            modal_layer.toggle_modal(window, cx, build)
+            modal_layer.toggle_modal(fallback_focus_handle, window, cx, build)
+        })
+    }
+
+    pub(crate) fn surface_focus_fallback(&self, window: &Window, cx: &App) -> FocusHandle {
+        // Focusing the center would unzoom a dock panel, and an empty center has no
+        // useful target while an open panel is available.
+        let mut target = None;
+        for dock in self.all_docks() {
+            let dock = dock.read(cx);
+            if dock.is_open()
+                && let Some(panel) = dock.active_panel()
+            {
+                if panel.is_zoomed(window, cx)
+                    || (self.active_item(cx).is_none() && target.is_none())
+                {
+                    target = Some(panel.activation_focus_handle(cx));
+                    if panel.is_zoomed(window, cx) {
+                        break;
+                    }
+                }
+            }
+        }
+        target.unwrap_or_else(|| {
+            self.active_item(cx)
+                .map(|item| item.item_focus_handle(cx))
+                .unwrap_or_else(|| self.active_pane.focus_handle(cx))
         })
     }
 
@@ -8162,8 +8193,17 @@ impl Workspace {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        let target_pane = self
+            .all_docks()
+            .into_iter()
+            .find_map(|dock| {
+                let pane = dock.read(cx).active_panel()?.pane(cx)?;
+                pane.read(cx).has_focus(window, cx).then_some(pane.clone())
+            })
+            .unwrap_or_else(|| self.active_pane.clone());
+
         if self.zoomed.is_some() {
-            self.active_pane.update(cx, |pane, cx| {
+            target_pane.update(cx, |pane, cx| {
                 pane.set_zoomed(false, cx);
             });
             self.zoomed = None;
@@ -8172,14 +8212,16 @@ impl Workspace {
         }
 
         if let Some(maximized) = self.maximized_pane.take() {
-            if maximized.upgrade().as_ref() == Some(&self.active_pane) {
+            if maximized.upgrade().as_ref() == Some(&target_pane) {
                 cx.notify();
                 return;
             }
         }
 
-        self.maximized_pane = Some(self.active_pane.downgrade());
-        window.focus(&self.active_pane.focus_handle(cx), cx);
+        self.maximized_pane = Some(target_pane.downgrade());
+        if !target_pane.read(cx).has_focus(window, cx) {
+            window.focus(&target_pane.focus_handle(cx), cx);
+        }
         cx.notify();
     }
 
@@ -8204,6 +8246,16 @@ impl Workspace {
         cx: &mut App,
     ) -> Option<Stateful<Div>> {
         if self.zoomed_position == Some(position) {
+            return None;
+        }
+
+        let maximized_pane = self.maximized_pane.as_ref().and_then(WeakEntity::upgrade);
+        let dock_contains_maximized_pane = dock
+            .read(cx)
+            .active_panel()
+            .and_then(|panel| panel.pane(cx))
+            .is_some_and(|pane| Some(pane) == maximized_pane);
+        if dock_contains_maximized_pane {
             return None;
         }
 
@@ -8439,6 +8491,13 @@ impl Workspace {
         window: &mut Window,
         cx: &mut App,
     ) -> impl IntoElement {
+        let maximized_external_pane = self
+            .maximized_pane
+            .as_ref()
+            .and_then(WeakEntity::upgrade)
+            .filter(|pane| !self.panes.contains(pane));
+        let has_maximized_external_pane = maximized_external_pane.is_some();
+
         div()
             .id("editor-region")
             .role(gpui::Role::Main)
@@ -8447,13 +8506,20 @@ impl Workspace {
                 this.track_focus(&self.region_focus_handles.editor)
             })
             .size_full()
-            .child(self.center.render(
-                self.zoomed.as_ref(),
-                self.maximized_pane.as_ref(),
-                render_cx,
-                window,
-                cx,
-            ))
+            .when_some(maximized_external_pane, |this, pane| {
+                this.child(
+                    AnyView::from(pane).cached(StyleRefinement::default().v_flex().size_full()),
+                )
+            })
+            .when(!has_maximized_external_pane, |this| {
+                this.child(self.center.render(
+                    self.zoomed.as_ref(),
+                    self.maximized_pane.as_ref(),
+                    render_cx,
+                    window,
+                    cx,
+                ))
+            })
     }
 
     pub fn for_window(window: &Window, cx: &App) -> Option<Entity<Workspace>> {
@@ -11788,6 +11854,62 @@ mod tests {
     }
 
     #[gpui::test]
+    fn test_default_surface_roles(cx: &mut TestAppContext) {
+        init_test(cx);
+
+        let item = cx.new(TestItem::new);
+        assert_eq!(ItemHandle::surface_role(&item), SurfaceRole::SpecialBuffer);
+
+        let panel = cx.new(|cx| TestPanel::new(DockPosition::Left, 100, cx));
+        assert_eq!(
+            PanelHandle::surface_role(&panel),
+            SurfaceRole::PersistentPanel
+        );
+    }
+
+    #[gpui::test]
+    async fn test_close_active_dock_focuses_active_item(cx: &mut TestAppContext) {
+        init_test(cx);
+
+        let fs = FakeFs::new(cx.executor());
+        let project = Project::test(fs, [], cx).await;
+        let (multi_workspace, cx) =
+            cx.add_window_view(|window, cx| MultiWorkspace::test_new(project, window, cx));
+        let workspace =
+            multi_workspace.read_with(cx, |multi_workspace, _| multi_workspace.workspace().clone());
+
+        let (panel, item) = workspace.update_in(cx, |workspace, window, cx| {
+            let panel = cx.new(|cx| TestPanel::new(DockPosition::Right, 100, cx));
+            workspace.add_panel(panel.clone(), window, cx);
+            workspace
+                .right_dock()
+                .update(cx, |dock, cx| dock.set_open(true, window, cx));
+
+            let item = cx.new(TestItem::new);
+            workspace.active_pane().update(cx, |pane, cx| {
+                pane.add_item(Box::new(item.clone()), true, true, None, window, cx);
+            });
+            (panel, item)
+        });
+        cx.run_until_parked();
+
+        workspace.update_in(cx, |workspace, window, cx| {
+            workspace.toggle_panel_focus::<TestPanel>(window, cx);
+        });
+
+        cx.update(|window, cx| {
+            assert!(panel.focus_handle(cx).contains_focused(window, cx));
+        });
+
+        cx.dispatch_action(CloseActiveDock);
+
+        workspace.update_in(cx, |workspace, window, cx| {
+            assert!(!workspace.right_dock().read(cx).is_open());
+            assert!(item.focus_handle(cx).is_focused(window));
+        });
+    }
+
+    #[gpui::test]
     async fn test_tab_disambiguation(cx: &mut TestAppContext) {
         init_test(cx);
 
@@ -15008,6 +15130,58 @@ mod tests {
         ) -> impl IntoElement {
             div().track_focus(&self.0)
         }
+    }
+
+    #[gpui::test]
+    async fn test_modal_surface_role(cx: &mut gpui::TestAppContext) {
+        init_test(cx);
+
+        let fs = FakeFs::new(cx.executor());
+        let project = Project::test(fs, [], cx).await;
+        let (workspace, cx) =
+            cx.add_window_view(|window, cx| Workspace::test_new(project, window, cx));
+
+        workspace.update_in(cx, |workspace, window, cx| {
+            workspace.toggle_modal(window, cx, TestModal::new);
+        });
+
+        assert_eq!(
+            workspace.read_with(cx, |workspace, cx| {
+                workspace.modal_layer.read(cx).active_surface_role()
+            }),
+            Some(SurfaceRole::Transient)
+        );
+    }
+
+    #[gpui::test]
+    async fn test_modal_cancel_uses_workspace_focus_fallback(cx: &mut gpui::TestAppContext) {
+        init_test(cx);
+
+        let fs = FakeFs::new(cx.executor());
+        let project = Project::test(fs, [], cx).await;
+        let (multi_workspace, cx) =
+            cx.add_window_view(|window, cx| MultiWorkspace::test_new(project, window, cx));
+        let workspace =
+            multi_workspace.read_with(cx, |multi_workspace, _| multi_workspace.workspace().clone());
+        let workspace_focus = workspace.read_with(cx, |workspace, cx| workspace.focus_handle(cx));
+        let previous_focus = cx.update(|window, cx| {
+            let previous_focus = cx.focus_handle();
+            window.focus(&previous_focus, cx);
+            previous_focus
+        });
+
+        workspace.update_in(cx, |workspace, window, cx| {
+            workspace.toggle_modal(window, cx, TestModal::new);
+        });
+        cx.run_until_parked();
+        drop(previous_focus);
+
+        cx.dispatch_action(menu::Cancel);
+
+        cx.update(|window, cx| {
+            assert!(workspace.read(cx).active_modal::<TestModal>(cx).is_none());
+            assert!(workspace_focus.contains_focused(window, cx));
+        });
     }
 
     // Registers its focus handle as a reopenable picker on construction, like a real

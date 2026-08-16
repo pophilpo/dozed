@@ -549,7 +549,7 @@
       "space w j": "workspace::ActivatePaneDown",
       "space w k": "workspace::ActivatePaneUp",
       "space w l": "workspace::ActivatePaneRight",
-      "space w q": "pane::CloseActiveItem",
+      "space w q": "pane::JoinIntoNext",
       "space w r": "pane::SplitRight", // not a helix default
       "space w d": "pane::SplitDown", // not a helix default
 
@@ -964,10 +964,10 @@
       "ctrl-w shift-s": "pane::SplitHorizontal",
       "ctrl-w ctrl-s": "pane::SplitHorizontal",
       "ctrl-w s": "pane::SplitHorizontal",
-      "ctrl-w ctrl-c": "pane::CloseActiveItem",
-      "ctrl-w c": "pane::CloseActiveItem",
-      "ctrl-w ctrl-q": "pane::CloseActiveItem",
-      "ctrl-w q": "pane::CloseActiveItem",
+      "ctrl-w ctrl-c": "pane::JoinIntoNext",
+      "ctrl-w c": "pane::JoinIntoNext",
+      "ctrl-w ctrl-q": "pane::JoinIntoNext",
+      "ctrl-w q": "pane::JoinIntoNext",
       "ctrl-w ctrl-a": "pane::CloseAllItems",
       "ctrl-w a": "pane::CloseAllItems",
       "ctrl-w ctrl-o": "workspace::CloseInactiveTabsAndPanes",
@@ -995,7 +995,6 @@
       "space w j": "workspace::ActivatePaneDown",
       "space w k": "workspace::ActivatePaneUp",
       "space w l": "workspace::ActivatePaneRight",
-      "space w q": "pane::CloseActiveItem",
     },
   },
   {
@@ -1232,6 +1231,96 @@
       "enter": "notebook::EnterEditMode",
       "shift-enter": "notebook::RunAndAdvance",
       "ctrl-enter": "notebook::Run",
+    },
+  },
+  {
+    "context": "((NormalBuffer > vim_mode == normal) || (SpecialBuffer > vim_mode == normal)) && !PersistentPanel",
+    "bindings": {
+      "space b n": "pane::ActivateNextItem",
+      "space b p": "pane::ActivatePreviousItem",
+      "space w q": "pane::JoinIntoNext",
+      "ctrl-w ctrl-c": "pane::JoinIntoNext",
+      "ctrl-w c": "pane::JoinIntoNext",
+      "ctrl-w ctrl-q": "pane::JoinIntoNext",
+      "ctrl-w q": "pane::JoinIntoNext",
+      "space w m": "workspace::ToggleEditorZoom",
+    },
+  },
+  {
+    "context": "((NormalBuffer && !Editor) || (SpecialBuffer && !Editor && !Terminal)) && !PersistentPanel",
+    "bindings": {
+      "space b n": "pane::ActivateNextItem",
+      "space b p": "pane::ActivatePreviousItem",
+      "space w q": "pane::JoinIntoNext",
+    },
+  },
+  {
+    "context": "Terminal && vi_mode && !PersistentPanel && !menu",
+    "bindings": {
+      "space b n": "pane::ActivateNextItem",
+      "space b p": "pane::ActivatePreviousItem",
+      "space w q": "pane::JoinIntoNext",
+      "ctrl-w ctrl-c": "pane::JoinIntoNext",
+      "ctrl-w c": "pane::JoinIntoNext",
+      "ctrl-w ctrl-q": "pane::JoinIntoNext",
+      "ctrl-w q": "pane::JoinIntoNext",
+      "space w m": "workspace::ToggleEditorZoom",
+    },
+  },
+  {
+    "context": "(PersistentPanel > Terminal && vi_mode) && !menu",
+    "bindings": {
+      "space b n": "pane::ActivateNextItem",
+      "space b p": "pane::ActivatePreviousItem",
+      "space w q": "workspace::CloseActiveDock",
+      "ctrl-w ctrl-c": "workspace::CloseActiveDock",
+      "ctrl-w c": "workspace::CloseActiveDock",
+      "ctrl-w ctrl-q": "workspace::CloseActiveDock",
+      "ctrl-w q": "workspace::CloseActiveDock",
+      "space w m": "workspace::ToggleEditorZoom",
+    },
+  },
+  {
+    "context": "((SpecialBuffer && !Editor) || (SpecialBuffer > vim_mode == normal)) && !Terminal",
+    "bindings": {
+      "q": "pane::CloseActiveItem",
+    },
+  },
+  {
+    "context": "(TransientSurface && !Editor) || (TransientSurface > vim_mode == normal)",
+    "bindings": {
+      "q": "menu::Cancel",
+    },
+  },
+  {
+    "context": "(NormalBuffer && !Editor) || (NormalBuffer > vim_mode == normal)",
+    "bindings": {
+      "space b k": "pane::CloseActiveItem",
+    },
+  },
+  {
+    "context": "((PersistentPanel && !Editor) || (PersistentPanel > vim_mode == normal)) && !TerminalPanel",
+    "bindings": {
+      "q": "workspace::CloseActiveDock",
+      "space w q": "workspace::CloseActiveDock",
+    },
+  },
+  {
+    "context": "(Picker && !Editor) || (Picker > vim_mode == normal)",
+    "bindings": {
+      "q": "menu::Cancel",
+    },
+  },
+  {
+    "context": "(ContextMenu && !Editor) || (vim_mode == normal > ContextMenu)",
+    "bindings": {
+      "q": "menu::Cancel",
+    },
+  },
+  {
+    "context": "Editor && vim_mode == normal && menu",
+    "bindings": {
+      "q": "menu::Cancel",
     },
   },
   {
