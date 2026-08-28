@@ -35,6 +35,9 @@ shape. Every surface has one role:
   Directory search is incremental: accepting keeps the matched selection while
   cancelling restores the selection from before the search. Vim next- and
   previous-match commands continue the accepted search with wraparound.
+  The presentation stays line-oriented and compact, with an explicit parent
+  entry and lightweight file metadata. Refresh rereads the filesystem while
+  preserving the selected path when it still exists.
   The existing Project Panel remains available while directory-buffer
   operations are added.
 - Mouse, Vim, and command-driven interaction follow the same lifecycle rules.

@@ -5771,6 +5771,7 @@ mod tests {
             (&["j"][..], "menu::SelectNext"),
             (&["k"][..], "menu::SelectPrevious"),
             (&["g", "g"][..], "menu::SelectFirst"),
+            (&["g", "r"][..], "project_browser::Refresh"),
             (&["shift-g"][..], "menu::SelectLast"),
             (&["h"][..], "project_browser::GoUp"),
             (&["l"][..], "menu::Confirm"),

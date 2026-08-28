@@ -17,9 +17,10 @@ use gpui::{
 use menu::{Confirm, SelectFirst, SelectLast, SelectNext, SelectPrevious};
 use project::{Project, ProjectPath};
 use ui::{
-    Color, Icon, IconName, IconSize, Label, ListItem, ListItemSpacing, WithScrollbar, prelude::*,
+    Color, Icon, IconName, IconSize, Label, LabelSize, ListItem, ListItemSpacing, WithScrollbar,
+    prelude::*,
 };
-use util::{ResultExt, paths};
+use util::{ResultExt, paths, size::format_file_size};
 use workspace::{
     Item, OpenMode, OpenOptions, OpenVisible, Workspace, notifications::DetachAndPromptErr,
 };
@@ -33,7 +34,8 @@ actions!(
         ConfirmSearch,
         CancelSearch,
         SearchNext,
-        SearchPrevious
+        SearchPrevious,
+        Refresh
     ]
 );
 
@@ -41,15 +43,41 @@ actions!(
 struct DirectoryEntry {
     path: PathBuf,
     is_directory: bool,
+    is_parent: bool,
+    is_symlink: bool,
+    length: u64,
 }
 
 impl DirectoryEntry {
+    fn parent(path: PathBuf) -> Self {
+        Self {
+            path,
+            is_directory: true,
+            is_parent: true,
+            is_symlink: false,
+            length: 0,
+        }
+    }
+
     fn file_name(&self) -> SharedString {
+        if self.is_parent {
+            return "..".into();
+        }
         self.path
             .file_name()
             .map(|name| name.to_string_lossy().into_owned())
             .unwrap_or_else(|| self.path.to_string_lossy().into_owned())
             .into()
+    }
+
+    fn details(&self) -> SharedString {
+        if self.is_directory {
+            "<dir>".into()
+        } else if self.is_symlink {
+            "link".into()
+        } else {
+            format_file_size(self.length, false).into()
+        }
     }
 }
 
@@ -109,6 +137,14 @@ impl ProjectDirectoryView {
 
     fn selected_entry(&self) -> Option<DirectoryEntry> {
         self.entries.get(self.selected_index).cloned()
+    }
+
+    fn default_selected_index(entries: &[DirectoryEntry]) -> usize {
+        if entries.len() > 1 && entries.first().is_some_and(|entry| entry.is_parent) {
+            1
+        } else {
+            0
+        }
     }
 
     fn select_index(&mut self, index: usize, cx: &mut Context<Self>) {
@@ -290,7 +326,7 @@ impl ProjectDirectoryView {
                             .and_then(|path| {
                                 this.entries.iter().position(|entry| &entry.path == path)
                             })
-                            .unwrap_or(0);
+                            .unwrap_or_else(|| Self::default_selected_index(&this.entries));
                         this.scroll_handle
                             .scroll_to_item(this.selected_index, ScrollStrategy::Nearest);
                     }
@@ -312,6 +348,12 @@ impl ProjectDirectoryView {
 
         if !entry.is_directory {
             self.open_file(entry.path, window, cx);
+            return;
+        }
+
+        if entry.is_parent {
+            let previous_path = self.current_path.clone();
+            self.load_directory(entry.path, Some(previous_path), window, cx);
             return;
         }
 
@@ -396,6 +438,11 @@ impl ProjectDirectoryView {
         self.load_directory(parent_path, Some(previous_path), window, cx);
     }
 
+    fn refresh(&mut self, _: &Refresh, window: &mut Window, cx: &mut Context<Self>) {
+        let selected_path = self.selected_entry().map(|entry| entry.path);
+        self.load_directory(self.current_path.clone(), selected_path, window, cx);
+    }
+
     fn render_entries(
         &mut self,
         range: Range<usize>,
@@ -411,13 +458,27 @@ impl ProjectDirectoryView {
                 } else {
                     IconName::File
                 };
+                let name = entry.file_name();
+                let details = entry.details();
 
                 Some(
                     ListItem::new(index)
-                        .spacing(ListItemSpacing::Sparse)
+                        .spacing(ListItemSpacing::ExtraDense)
                         .toggle_state(selected)
+                        .aria_label(name.clone())
                         .start_slot(Icon::new(icon).size(IconSize::Small).color(Color::Muted))
-                        .child(Label::new(entry.file_name()))
+                        .child(
+                            h_flex()
+                                .gap_2()
+                                .child(
+                                    div().w(rems(5.)).flex_none().text_right().child(
+                                        Label::new(details)
+                                            .size(LabelSize::Small)
+                                            .color(Color::Muted),
+                                    ),
+                                )
+                                .child(Label::new(name)),
+                        )
                         .on_click(
                             cx.listener(move |this, event: &gpui::ClickEvent, window, cx| {
                                 this.select_index(index, cx);
@@ -464,12 +525,19 @@ impl Render for ProjectDirectoryView {
             .on_action(cx.listener(Self::cancel_search))
             .on_action(cx.listener(Self::search_next))
             .on_action(cx.listener(Self::search_previous))
+            .on_action(cx.listener(Self::refresh))
             .child(
                 h_flex()
-                    .h_9()
+                    .h_8()
                     .px_3()
+                    .gap_2()
                     .border_b_1()
                     .border_color(cx.theme().colors().border)
+                    .child(
+                        Label::new("Directory")
+                            .size(LabelSize::Small)
+                            .color(Color::Muted),
+                    )
                     .child(Label::new(self.display_path())),
             )
             .when_some(
@@ -552,6 +620,9 @@ async fn read_directory(fs: &dyn Fs, path: &Path) -> Result<Vec<DirectoryEntry>>
         entries.push(DirectoryEntry {
             path: child_path,
             is_directory: metadata.is_dir,
+            is_parent: false,
+            is_symlink: metadata.is_symlink,
+            length: metadata.len,
         });
     }
     entries.sort_by(
@@ -561,6 +632,9 @@ async fn read_directory(fs: &dyn Fs, path: &Path) -> Result<Vec<DirectoryEntry>>
             _ => left.file_name().cmp(&right.file_name()),
         },
     );
+    if let Some(parent_path) = path.parent() {
+        entries.insert(0, DirectoryEntry::parent(parent_path.to_path_buf()));
+    }
     Ok(entries)
 }
 
@@ -660,12 +734,17 @@ mod tests {
                     .iter()
                     .map(DirectoryEntry::file_name)
                     .collect::<Vec<_>>(),
-                ["directory", "root.txt"]
+                ["..", "directory", "root.txt"]
+            );
+            assert_eq!(
+                directory_view.selected_entry().map(|entry| entry.path),
+                Some(PathBuf::from("/home/user/project/directory"))
             );
         });
 
         directory_view.update_in(cx, |directory_view, window, cx| {
-            directory_view.go_up(&GoUp, window, cx);
+            directory_view.select_index(0, cx);
+            directory_view.open_selected(&Confirm, window, cx);
         });
         cx.run_until_parked();
         directory_view.read_with(cx, |directory_view, _| {
@@ -764,6 +843,50 @@ mod tests {
             .expect("directory view should be active");
         directory_view.read_with(cx, |directory_view, _| {
             assert_eq!(directory_view.current_path, Path::new("/project/src"));
+        });
+    }
+
+    #[gpui::test]
+    async fn test_refresh_rereads_directory_and_preserves_selection(cx: &mut TestAppContext) {
+        crate::project_panel_tests::init_test(cx);
+        let fs = FakeFs::new(cx.executor());
+        fs.insert_tree("/project", json!({ "existing.txt": "existing" }))
+            .await;
+        let project = Project::test(fs.clone(), ["/project".as_ref()], cx).await;
+        let window =
+            cx.add_window(|window, cx| MultiWorkspace::test_new(project.clone(), window, cx));
+        let workspace = window
+            .read_with(cx, |multi_workspace, _| multi_workspace.workspace().clone())
+            .expect("workspace should exist");
+        let cx = &mut VisualTestContext::from_window(window.into(), cx);
+
+        workspace.update_in(cx, open);
+        cx.run_until_parked();
+        let directory_view = workspace
+            .read_with(cx, |workspace, cx| {
+                workspace.active_item_as::<ProjectDirectoryView>(cx)
+            })
+            .expect("directory view should be active");
+        fs.insert_file("/project/new.txt", b"new".to_vec()).await;
+
+        directory_view.update_in(cx, |directory_view, window, cx| {
+            directory_view.refresh(&Refresh, window, cx);
+        });
+        cx.run_until_parked();
+
+        directory_view.read_with(cx, |directory_view, _| {
+            assert_eq!(
+                directory_view
+                    .entries
+                    .iter()
+                    .map(DirectoryEntry::file_name)
+                    .collect::<Vec<_>>(),
+                ["..", "existing.txt", "new.txt"]
+            );
+            assert_eq!(
+                directory_view.selected_entry().map(|entry| entry.path),
+                Some(PathBuf::from("/project/existing.txt"))
+            );
         });
     }
 
@@ -944,11 +1067,14 @@ mod tests {
         directory_view.read_with(cx, |directory_view, _| {
             assert_eq!(directory_view.current_path, paths::home_dir().as_path());
             assert_eq!(
+                directory_view.selected_entry().map(|entry| entry.path),
+                Some(paths::home_dir().join("project"))
+            );
+            assert!(
                 directory_view
                     .entries
                     .first()
-                    .map(|entry| entry.path.as_path()),
-                Some(paths::home_dir().join("project").as_path())
+                    .is_some_and(|entry| entry.is_parent)
             );
         });
     }

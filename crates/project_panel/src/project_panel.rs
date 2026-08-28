@@ -4,7 +4,7 @@ mod undo;
 mod utils;
 
 pub use directory_view::{
-    CancelSearch, ConfirmSearch, GoUp, OpenDirectory, ProjectDirectoryView, SearchNext,
+    CancelSearch, ConfirmSearch, GoUp, OpenDirectory, ProjectDirectoryView, Refresh, SearchNext,
     SearchPrevious, StartSearch,
 };
 
