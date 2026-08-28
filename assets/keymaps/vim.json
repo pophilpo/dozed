@@ -1236,7 +1236,7 @@
   {
     "context": "((NormalBuffer > vim_mode == normal) || (SpecialBuffer > vim_mode == normal)) && !PersistentPanel",
     "bindings": {
-      "-": "project_browser::OpenDirectory",
+      "-": "project_browser::OpenDirectorySplit",
       "space b n": "pane::ActivateNextItem",
       "space b p": "pane::ActivatePreviousItem",
       "space w q": "pane::JoinIntoNext",
@@ -1250,10 +1250,11 @@
   {
     "context": "((NormalBuffer && !Editor) || (SpecialBuffer && !Editor && !Terminal)) && !PersistentPanel",
     "bindings": {
-      "-": "project_browser::OpenDirectory",
+      "-": "project_browser::OpenDirectorySplit",
       "space b n": "pane::ActivateNextItem",
       "space b p": "pane::ActivatePreviousItem",
       "space w q": "pane::JoinIntoNext",
+      "space w m": "workspace::ToggleEditorZoom",
     },
   },
   {
@@ -1340,7 +1341,7 @@
   {
     "context": "EmptyPane",
     "bindings": {
-      "-": "project_browser::OpenDirectory",
+      "-": "project_browser::OpenDirectorySplit",
     },
   },
   {

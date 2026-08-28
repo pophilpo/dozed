@@ -5731,6 +5731,17 @@ mod tests {
                     .any(|action| action == "pane::CloseActiveItem")
             );
         }
+        for context in [
+            normal_editor.as_slice(),
+            special_view.as_slice(),
+            normal_notebook.as_slice(),
+            center_terminal.as_slice(),
+        ] {
+            assert_eq!(
+                vim_bindings_for(&["space", "w", "m"], context, cx).first(),
+                Some(&"workspace::ToggleEditorZoom".to_string())
+            );
+        }
         assert_eq!(
             vim_bindings_for(&["ctrl-w", "q"], &normal_editor, cx).first(),
             Some(&"pane::JoinIntoNext".to_string())
@@ -5757,15 +5768,15 @@ mod tests {
         );
         assert_eq!(
             vim_bindings_for(&["-"], &normal_editor, cx).first(),
-            Some(&"project_browser::OpenDirectory".to_string())
+            Some(&"project_browser::OpenDirectorySplit".to_string())
         );
         assert_eq!(
             vim_bindings_for(&["-"], &special_view, cx).first(),
-            Some(&"project_browser::OpenDirectory".to_string())
+            Some(&"project_browser::OpenDirectorySplit".to_string())
         );
         assert_eq!(
             vim_bindings_for(&["-"], &empty_pane, cx).first(),
-            Some(&"project_browser::OpenDirectory".to_string())
+            Some(&"project_browser::OpenDirectorySplit".to_string())
         );
         for (keystrokes, expected_action) in [
             (&["j"][..], "menu::SelectNext"),
@@ -5779,6 +5790,7 @@ mod tests {
             (&["/"][..], "project_browser::StartSearch"),
             (&["n"][..], "project_browser::SearchNext"),
             (&["shift-n"][..], "project_browser::SearchPrevious"),
+            (&["space", "w", "m"][..], "workspace::ToggleEditorZoom"),
             (&["q"][..], "pane::CloseActiveItem"),
         ] {
             assert_eq!(
@@ -5786,6 +5798,11 @@ mod tests {
                 Some(&expected_action.to_string())
             );
         }
+        assert!(
+            !vim_bindings_for(&["space", "w", "m"], &project_directory_search, cx)
+                .iter()
+                .any(|action| action == "workspace::ToggleEditorZoom")
+        );
         for (keystrokes, expected_action) in [
             (&["enter"][..], "project_browser::ConfirmSearch"),
             (&["escape"][..], "project_browser::CancelSearch"),

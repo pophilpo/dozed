@@ -28,7 +28,6 @@ use workspace::{
 actions!(
     project_browser,
     [
-        OpenDirectory,
         GoUp,
         StartSearch,
         ConfirmSearch,
@@ -667,15 +666,16 @@ fn initial_directory(workspace: &Workspace, cx: &App) -> PathBuf {
         .unwrap_or_else(|| paths::home_dir().to_path_buf())
 }
 
-pub fn open(workspace: &mut Workspace, window: &mut Window, cx: &mut Context<Workspace>) {
+pub(crate) fn create(
+    workspace: &Workspace,
+    window: &mut Window,
+    cx: &mut Context<Workspace>,
+) -> Entity<ProjectDirectoryView> {
     let current_path = initial_directory(workspace, cx);
     let fs = workspace.app_state().fs.clone();
     let project = workspace.project().clone();
     let workspace_handle = workspace.weak_handle();
-    let directory_view = cx.new(|cx| {
-        ProjectDirectoryView::new(fs, project, workspace_handle, current_path, window, cx)
-    });
-    workspace.add_item_to_active_pane(Box::new(directory_view), None, true, window, cx);
+    cx.new(|cx| ProjectDirectoryView::new(fs, project, workspace_handle, current_path, window, cx))
 }
 
 #[cfg(test)]
@@ -685,9 +685,17 @@ mod tests {
     use project::FakeFs;
     use serde_json::json;
     use util::rel_path::rel_path;
-    use workspace::{ItemHandle, MultiWorkspace, SurfaceRole};
+    use workspace::{ItemHandle, ItemPlacement, MultiWorkspace, SurfaceRole};
 
     use super::*;
+
+    fn display_in_active_pane(
+        workspace: &mut Workspace,
+        window: &mut Window,
+        cx: &mut Context<Workspace>,
+    ) {
+        crate::display_directory(workspace, ItemPlacement::ActivePane, window, cx);
+    }
 
     #[gpui::test]
     async fn test_directory_navigation_beyond_project_root(cx: &mut TestAppContext) {
@@ -714,7 +722,7 @@ mod tests {
             .expect("workspace should exist");
         let cx = &mut VisualTestContext::from_window(window.into(), cx);
 
-        workspace.update_in(cx, open);
+        workspace.update_in(cx, display_in_active_pane);
         cx.run_until_parked();
         let directory_view = workspace
             .read_with(cx, |workspace, cx| {
@@ -808,7 +816,7 @@ mod tests {
             .expect("workspace should exist");
         let cx = &mut VisualTestContext::from_window(window.into(), cx);
 
-        workspace.update_in(cx, open);
+        workspace.update_in(cx, display_in_active_pane);
         cx.run_until_parked();
         let directory_view = workspace
             .read_with(cx, |workspace, cx| {
@@ -834,7 +842,7 @@ mod tests {
             Some(Arc::from(rel_path("src/main.rs")))
         );
 
-        workspace.update_in(cx, open);
+        workspace.update_in(cx, display_in_active_pane);
         cx.run_until_parked();
         let directory_view = workspace
             .read_with(cx, |workspace, cx| {
@@ -843,6 +851,32 @@ mod tests {
             .expect("directory view should be active");
         directory_view.read_with(cx, |directory_view, _| {
             assert_eq!(directory_view.current_path, Path::new("/project/src"));
+        });
+    }
+
+    #[gpui::test]
+    async fn test_open_directory_in_split(cx: &mut TestAppContext) {
+        crate::project_panel_tests::init_test(cx);
+        let fs = FakeFs::new(cx.executor());
+        fs.insert_tree("/project", json!({ "src": {} })).await;
+        let project = Project::test(fs, ["/project".as_ref()], cx).await;
+        let window =
+            cx.add_window(|window, cx| MultiWorkspace::test_new(project.clone(), window, cx));
+        let workspace = window
+            .read_with(cx, |multi_workspace, _| multi_workspace.workspace().clone())
+            .expect("workspace should exist");
+        let cx = &mut VisualTestContext::from_window(window.into(), cx);
+
+        cx.dispatch_action(crate::OpenDirectorySplit);
+        cx.run_until_parked();
+
+        workspace.read_with(cx, |workspace, cx| {
+            assert_eq!(workspace.panes().len(), 2);
+            assert!(
+                workspace
+                    .active_item_as::<ProjectDirectoryView>(cx)
+                    .is_some()
+            );
         });
     }
 
@@ -860,7 +894,7 @@ mod tests {
             .expect("workspace should exist");
         let cx = &mut VisualTestContext::from_window(window.into(), cx);
 
-        workspace.update_in(cx, open);
+        workspace.update_in(cx, display_in_active_pane);
         cx.run_until_parked();
         let directory_view = workspace
             .read_with(cx, |workspace, cx| {
@@ -907,7 +941,7 @@ mod tests {
             .expect("workspace should exist");
         let cx = &mut VisualTestContext::from_window(window.into(), cx);
 
-        workspace.update_in(cx, open);
+        workspace.update_in(cx, display_in_active_pane);
         cx.run_until_parked();
         let directory_view = workspace
             .read_with(cx, |workspace, cx| {
@@ -1005,7 +1039,7 @@ mod tests {
             .expect("workspace should exist");
         let cx = &mut VisualTestContext::from_window(window.into(), cx);
 
-        workspace.update_in(cx, open);
+        workspace.update_in(cx, display_in_active_pane);
         cx.run_until_parked();
         let directory_view = workspace
             .read_with(cx, |workspace, cx| {
@@ -1057,7 +1091,7 @@ mod tests {
             .expect("workspace should exist");
         let cx = &mut VisualTestContext::from_window(window.into(), cx);
 
-        workspace.update_in(cx, open);
+        workspace.update_in(cx, display_in_active_pane);
         cx.run_until_parked();
         let directory_view = workspace
             .read_with(cx, |workspace, cx| {

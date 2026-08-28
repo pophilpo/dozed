@@ -19,6 +19,10 @@ shape. Every surface has one role:
 - The container owns the role. Pane items additionally declare whether they are
   normal or special buffers. Embedding an editor or picker does not turn a
   transient surface into a buffer.
+- Buffers own their content state and local commands. The workspace owns their
+  placement, focus, splits, sizing, and maximize state. A launcher creates a
+  buffer and submits a display request, so the same buffer type can appear in
+  the active pane or in a split without implementing either layout itself.
 - In Vim normal mode, the local quit command closes special buffers,
   transient surfaces, and navigational persistent panels. Normal buffers use
   the buffer-kill command instead.
@@ -37,7 +41,10 @@ shape. Every surface has one role:
   previous-match commands continue the accepted search with wraparound.
   The presentation stays line-oriented and compact, with an explicit parent
   entry and lightweight file metadata. Refresh rereads the filesystem while
-  preserving the selected path when it still exists.
+  preserving the selected path when it still exists. Its launchers can ask the
+  workspace to display the same buffer in the active pane or as a horizontal
+  split. The compact launcher requests forty percent of the pane being split;
+  sizing, maximize, and restore remain workspace behavior.
   The existing Project Panel remains available while directory-buffer
   operations are added.
 - Mouse, Vim, and command-driven interaction follow the same lifecycle rules.
