@@ -23,8 +23,8 @@ shape. Every surface has one role:
   and Evil commands. Dirvish remains a presentation and session layer for
   history, attributes, sorting, previews, quick access, and discoverable menus.
 - Doom's always-editable path prompt comes from `find-file` plus Vertico, not
-  Dired itself. Dozed deliberately combines that prompt with a Dired-like
-  directory buffer, so command keys that conflict with path text need prefixes.
+  Dired itself. Dozed preserves that boundary: the path prompt and the Dired
+  listing have different presentation, focus, and key contexts.
 - Dozed ports those behaviors onto typed filesystem state and the shared
   buffer/window model. It does not reproduce Dired's mutable text buffer,
   `ls` parsing, overlays, or dedicated Emacs windows.
@@ -55,24 +55,30 @@ shape. Every surface has one role:
   project root, falls back to the home directory in an empty workspace, and can
   navigate to the filesystem root. Entering a different Git repository opens
   it as a project workspace; ordinary directories remain in the same browser.
-  The directory path is the buffer's sole text input and retains keyboard
-  focus. Typing in it incrementally filters the displayed entries, with an
-  empty path query showing the full directory. Tab completes filesystem entries
-  and cycles matching candidates without changing the filter; only typed edits
-  change which entries are visible. Backspace moves to the parent directory
-  when the handle contains a resolved path; while it contains a partial edit,
-  Backspace deletes a character normally. Control-H/J/K/L navigate up, select,
-  and traverse entries without moving focus out of the path. Enter opens the
-  selected directory or file as the primary, maximized center-pane content.
-  Escape closes the browser while its always-focused path input is active.
+  Find-file keeps keyboard focus in its path input. Typing incrementally filters
+  candidates; Tab completes and cycles candidates without changing the filter.
+  Backspace moves to the parent for a resolved path and edits partial input
+  normally. Control-H/J/K/L navigate without leaving the input. Confirming an
+  existing directory replaces the prompt with a maximized Dired listing;
+  confirming a nonexistent path opens an unsaved file buffer at that path.
+  The compact `-` launcher opens find-file in a forty-percent split. Confirming
+  any ordinary directory replaces that navigator with Dired and maximizes its
+  pane.
+  Dired has no persistent text input and therefore uses direct normal-mode
+  commands. `h`/`l` navigate directories, `j`/`k` select, `+` prompts for a
+  directory to create, `R` renames or moves, and `x` moves targets to the
+  system trash.
+  Entry prompts are temporary and Escape returns focus to the Dired listing.
+  All of these bindings are scoped to the Dired or entry-edit key context and
+  do not participate in find-file or normal editor key resolution.
   Alt-B and Alt-F move backward and forward through visited directories while
   restoring the selection remembered in each directory. Marks are stored by
-  path, persist across directory history, and use the Alt-M prefix because
-  unmodified text remains path-filter input. File operations use marked entries
-  from the current directory when any exist, including marks hidden by the
-  active filter; otherwise they use the current entry. Alt-M X moves those
-  targets to the system trash, never permanently deletes them, and Alt-M Z
-  restores the most recent batch.
+  path and persist across directory history. File operations use marked entries
+  from the current directory when any exist, including marks hidden by a
+  transient filter; otherwise they use the current entry. Batch moves validate
+  every destination before making changes and attempt to roll back completed
+  moves if a later move fails. Trash operations never permanently delete and
+  the most recent batch can be restored.
   The presentation stays line-oriented and compact, with an explicit parent
   entry, slash-terminated directory names, and lightweight file metadata.
   Refresh rereads the filesystem while

@@ -5622,6 +5622,18 @@ mod tests {
             "ProjectDirectoryPath",
             "Editor mode=single_line",
         ];
+        let project_directory_dired = [
+            "Workspace",
+            "Pane SpecialBuffer",
+            "ProjectDirectory ProjectDirectoryDired",
+        ];
+        let project_directory_entry_edit = [
+            "Workspace",
+            "Pane SpecialBuffer",
+            "ProjectDirectory",
+            "ProjectDirectoryEntryEdit",
+            "Editor mode=single_line",
+        ];
         let empty_pane = ["Workspace", "Pane EmptyPane"];
         let picker_editor = ["Workspace", "Picker", "Editor VimControl vim_mode=normal"];
         let context_menu = [
@@ -5785,23 +5797,77 @@ mod tests {
             (&["ctrl-j"][..], "menu::SelectNext"),
             (&["ctrl-k"][..], "menu::SelectPrevious"),
             (&["ctrl-h"][..], "project_browser::GoUp"),
-            (&["ctrl-l"][..], "menu::Confirm"),
-            (&["alt-b"][..], "project_browser::HistoryBack"),
-            (&["alt-f"][..], "project_browser::HistoryForward"),
-            (&["alt-m", "m"][..], "project_browser::MarkSelected"),
-            (&["alt-m", "u"][..], "project_browser::UnmarkSelected"),
-            (&["alt-m", "shift-u"][..], "project_browser::ClearMarks"),
-            (&["alt-m", "t"][..], "project_browser::ToggleMarks"),
-            (&["alt-m", "n"][..], "project_browser::SelectNextMarked"),
-            (&["alt-m", "p"][..], "project_browser::SelectPreviousMarked"),
-            (&["alt-m", "x"][..], "project_browser::TrashSelected"),
-            (&["alt-m", "z"][..], "project_browser::UndoTrash"),
+            (&["ctrl-l"][..], "project_browser::NavigateSelected"),
         ] {
             assert_eq!(
                 vim_bindings_for(keystrokes, &project_directory_path, cx).first(),
                 Some(&expected_action.to_string())
             );
+            assert_ne!(
+                vim_bindings_for(keystrokes, &normal_editor, cx).first(),
+                Some(&expected_action.to_string())
+            );
         }
+        assert_eq!(
+            vim_bindings_for(&["escape"], &project_directory_dired, cx).first(),
+            Some(&"pane::CloseActiveItem".to_string())
+        );
+        for (keystrokes, expected_action) in [
+            (&["q"][..], "pane::CloseActiveItem"),
+            (&["j"][..], "menu::SelectNext"),
+            (&["k"][..], "menu::SelectPrevious"),
+            (&["g", "g"][..], "menu::SelectFirst"),
+            (&["shift-g"][..], "menu::SelectLast"),
+            (&["enter"][..], "menu::Confirm"),
+            (&["l"][..], "menu::Confirm"),
+            (&["h"][..], "project_browser::GoUp"),
+            (&["alt-b"][..], "project_browser::HistoryBack"),
+            (&["alt-f"][..], "project_browser::HistoryForward"),
+            (&["m"][..], "project_browser::MarkSelected"),
+            (&["u"][..], "project_browser::UnmarkSelected"),
+            (&["shift-u"][..], "project_browser::ClearMarks"),
+            (&["t"][..], "project_browser::ToggleMarks"),
+            (&["]", "m"][..], "project_browser::SelectNextMarked"),
+            (&["[", "m"][..], "project_browser::SelectPreviousMarked"),
+            (&["+"][..], "project_browser::CreateDirectory"),
+            (&["shift-r"][..], "project_browser::RenameSelected"),
+            (&["x"][..], "project_browser::TrashSelected"),
+            (&["ctrl-_"][..], "project_browser::UndoTrash"),
+            (&["r"][..], "project_browser::Refresh"),
+        ] {
+            assert_eq!(
+                vim_bindings_for(keystrokes, &project_directory_dired, cx).first(),
+                Some(&expected_action.to_string())
+            );
+            assert_ne!(
+                vim_bindings_for(keystrokes, &project_directory_path, cx).first(),
+                Some(&expected_action.to_string())
+            );
+            assert_ne!(
+                vim_bindings_for(keystrokes, &normal_editor, cx).first(),
+                Some(&expected_action.to_string())
+            );
+        }
+        assert_eq!(
+            vim_bindings_for(&["escape"], &project_directory_entry_edit, cx).first(),
+            Some(&"project_browser::CancelEntryEdit".to_string())
+        );
+        assert_eq!(
+            vim_bindings_for(&["enter"], &project_directory_entry_edit, cx).first(),
+            Some(&"project_browser::ConfirmEntryEdit".to_string())
+        );
+        assert_ne!(
+            vim_bindings_for(&["escape"], &normal_editor, cx).first(),
+            Some(&"project_browser::CancelEntryEdit".to_string())
+        );
+        assert_ne!(
+            vim_bindings_for(&["enter"], &normal_editor, cx).first(),
+            Some(&"project_browser::ConfirmEntryEdit".to_string())
+        );
+        assert_ne!(
+            vim_bindings_for(&["escape"], &project_directory_path, cx).first(),
+            Some(&"project_browser::CancelEntryEdit".to_string())
+        );
         assert_ne!(
             vim_bindings_for(&["j"], &project_directory_path, cx).first(),
             Some(&"menu::SelectNext".to_string())

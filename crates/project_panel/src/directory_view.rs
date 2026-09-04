@@ -11,7 +11,7 @@ use editor::{
     Editor, EditorEvent,
     actions::{Backspace, MoveToEndOfLine},
 };
-use fs::{Fs, RemoveOptions, TrashId};
+use fs::{Fs, RemoveOptions, RenameOptions, TrashId};
 use futures::StreamExt as _;
 use gpui::{
     AnyElement, App, Context, Entity, EventEmitter, FocusHandle, Focusable, IntoElement,
@@ -40,6 +40,7 @@ actions!(
         ConfirmPath,
         CompletePath,
         PathBackspace,
+        NavigateSelected,
         HistoryBack,
         HistoryForward,
         MarkSelected,
@@ -48,6 +49,10 @@ actions!(
         ToggleMarks,
         SelectNextMarked,
         SelectPreviousMarked,
+        CreateDirectory,
+        RenameSelected,
+        ConfirmEntryEdit,
+        CancelEntryEdit,
         TrashSelected,
         UndoTrash,
         Refresh
@@ -85,6 +90,44 @@ struct ResolvedPath {
 enum OpenBehavior {
     Navigate,
     Open,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum DirectoryViewMode {
+    FindFile,
+    Dired,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+enum EntryEditKind {
+    CreateDirectory,
+    Rename { sources: Vec<PathBuf> },
+}
+
+impl EntryEditKind {
+    fn label(&self) -> SharedString {
+        match self {
+            Self::CreateDirectory => "Create directory".into(),
+            Self::Rename { sources } if sources.len() == 1 => "Rename".into(),
+            Self::Rename { sources } => format!("Move {} entries", sources.len()).into(),
+        }
+    }
+
+    fn missing_input_message(&self) -> &'static str {
+        match self {
+            Self::CreateDirectory => "Enter a directory name",
+            Self::Rename { sources } if sources.len() == 1 => "Enter a new name or path",
+            Self::Rename { .. } => "Enter an existing destination directory",
+        }
+    }
+
+    fn failure_description(&self) -> &'static str {
+        match self {
+            Self::CreateDirectory => "create directory",
+            Self::Rename { sources } if sources.len() == 1 => "rename entry",
+            Self::Rename { .. } => "move entries",
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -134,6 +177,7 @@ pub struct ProjectDirectoryView {
     fs: Arc<dyn Fs>,
     project: Entity<Project>,
     workspace: WeakEntity<Workspace>,
+    mode: DirectoryViewMode,
     current_path: PathBuf,
     all_entries: Vec<DirectoryEntry>,
     entries: Vec<DirectoryEntry>,
@@ -149,6 +193,7 @@ pub struct ProjectDirectoryView {
     history: Vec<DirectoryHistoryEntry>,
     history_index: usize,
     marked_paths: HashSet<PathBuf>,
+    entry_edit: Option<EntryEditKind>,
     trash_history: Vec<Vec<TrashId>>,
     operation_in_progress: bool,
     operation_error: Option<SharedString>,
@@ -167,6 +212,7 @@ impl ProjectDirectoryView {
         project: Entity<Project>,
         workspace: WeakEntity<Workspace>,
         current_path: PathBuf,
+        mode: DirectoryViewMode,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
@@ -182,6 +228,7 @@ impl ProjectDirectoryView {
             fs,
             project,
             workspace,
+            mode,
             current_path: current_path.clone(),
             all_entries: Vec::new(),
             entries: Vec::new(),
@@ -203,6 +250,7 @@ impl ProjectDirectoryView {
             }],
             history_index: 0,
             marked_paths: HashSet::new(),
+            entry_edit: None,
             trash_history: Vec::new(),
             operation_in_progress: false,
             operation_error: None,
@@ -226,6 +274,11 @@ impl ProjectDirectoryView {
                 }
 
                 this.path_editor_text = text.clone();
+                if this.entry_edit.is_some() {
+                    this.path_error = None;
+                    cx.notify();
+                    return;
+                }
                 this.resolved_path = None;
                 this.path_completion = None;
                 this.path_error = None;
@@ -236,7 +289,9 @@ impl ProjectDirectoryView {
             }));
         this._subscriptions
             .push(cx.on_focus(&item_focus_handle, window, |this, window, cx| {
-                this.path_editor.read(cx).focus_handle(cx).focus(window, cx);
+                if this.mode == DirectoryViewMode::FindFile || this.entry_edit.is_some() {
+                    this.path_editor.read(cx).focus_handle(cx).focus(window, cx);
+                }
             }));
         this.load_directory(current_path, None, window, cx);
         this
@@ -409,6 +464,143 @@ impl ProjectDirectoryView {
             .filter(|entry| !entry.is_parent)
             .map(|entry| vec![entry.path])
             .unwrap_or_default()
+    }
+
+    fn begin_entry_edit(
+        &mut self,
+        kind: EntryEditKind,
+        initial_text: String,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if self.operation_in_progress {
+            return;
+        }
+        self.entry_edit = Some(kind);
+        self.path_editor_text = initial_text.clone();
+        self.path_completion = None;
+        self.resolved_path = None;
+        self.path_error = None;
+        self.operation_error = None;
+        self.path_editor.update(cx, |editor, cx| {
+            editor.set_text(initial_text, window, cx);
+            editor.move_to_end_of_line(&MoveToEndOfLine::default(), window, cx);
+            editor.focus_handle(cx).focus(window, cx);
+        });
+        cx.notify();
+    }
+
+    fn create_directory(
+        &mut self,
+        _: &CreateDirectory,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.begin_entry_edit(
+            EntryEditKind::CreateDirectory,
+            path_text(&self.current_path, true),
+            window,
+            cx,
+        );
+    }
+
+    fn rename_selected(&mut self, _: &RenameSelected, window: &mut Window, cx: &mut Context<Self>) {
+        let sources = self.operation_targets();
+        if sources.is_empty() {
+            return;
+        }
+        let initial_text = if let [source] = sources.as_slice() {
+            source
+                .file_name()
+                .map(|name| name.to_string_lossy().into_owned())
+                .unwrap_or_default()
+        } else {
+            String::new()
+        };
+        self.begin_entry_edit(EntryEditKind::Rename { sources }, initial_text, window, cx);
+    }
+
+    fn cancel_entry_edit(
+        &mut self,
+        _: &CancelEntryEdit,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if self.operation_in_progress || self.entry_edit.take().is_none() {
+            return;
+        }
+        self.set_path_text(self.current_path.clone(), true, window, cx);
+        self.filter_query.clear();
+        self.update_visible_entries(None);
+        self.item_focus_handle.focus(window, cx);
+        cx.notify();
+    }
+
+    fn confirm_entry_edit(
+        &mut self,
+        _: &ConfirmEntryEdit,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if self.operation_in_progress {
+            return;
+        }
+        let Some(kind) = self.entry_edit.clone() else {
+            return;
+        };
+        let input = self.path_editor.read(cx).text(cx);
+        let Some(path) = resolve_path_input(&input, &self.current_path) else {
+            self.path_error = Some(kind.missing_input_message().into());
+            cx.notify();
+            return;
+        };
+
+        let fs = self.fs.clone();
+        self.operation_in_progress = true;
+        self.path_error = None;
+        cx.notify();
+        self._operation_task = cx.spawn_in(window, async move |this, cx| {
+            let result = match &kind {
+                EntryEditKind::CreateDirectory => match fs
+                    .metadata(&path)
+                    .await
+                    .with_context(|| format!("inspecting {}", path.display()))
+                {
+                    Ok(Some(_)) => Err(anyhow::anyhow!("{} already exists", path.display())),
+                    Ok(None) => fs.create_dir(&path).await.map(|_| vec![path.clone()]),
+                    Err(error) => Err(error),
+                },
+                EntryEditKind::Rename { sources } => {
+                    rename_entries(fs.as_ref(), sources, &path).await
+                }
+            };
+
+            this.update_in(cx, |this, window, cx| {
+                this.operation_in_progress = false;
+                match result {
+                    Ok(affected_paths) => {
+                        if let EntryEditKind::Rename { sources } = &kind {
+                            for source in sources {
+                                this.marked_paths.remove(source);
+                            }
+                        }
+                        this.entry_edit = None;
+                        let path_to_select = affected_paths
+                            .into_iter()
+                            .find(|path| path.parent() == Some(this.current_path.as_path()));
+                        this.load_directory(this.current_path.clone(), path_to_select, window, cx);
+                        this.item_focus_handle.focus(window, cx);
+                    }
+                    Err(error) => {
+                        this.path_error = Some(
+                            format!("Failed to {}: {error:#}", kind.failure_description()).into(),
+                        );
+                        cx.notify();
+                    }
+                }
+            })
+            .log_err();
+        });
     }
 
     fn trash_selected(&mut self, _: &TrashSelected, window: &mut Window, cx: &mut Context<Self>) {
@@ -645,22 +837,50 @@ impl ProjectDirectoryView {
     }
 
     fn open_selected(&mut self, _: &Confirm, window: &mut Window, cx: &mut Context<Self>) {
+        let behavior = match self.selected_entry() {
+            Some(entry) if self.mode == DirectoryViewMode::Dired && entry.is_directory => {
+                OpenBehavior::Navigate
+            }
+            Some(_) => OpenBehavior::Open,
+            None => return,
+        };
+        self.activate_selected(behavior, window, cx);
+    }
+
+    fn navigate_selected(
+        &mut self,
+        _: &NavigateSelected,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.activate_selected(OpenBehavior::Navigate, window, cx);
+    }
+
+    fn activate_selected(
+        &mut self,
+        behavior: OpenBehavior,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         let Some(entry) = self.selected_entry() else {
             return;
         };
 
         if !entry.is_directory {
-            self.open_file(entry.path, OpenBehavior::Navigate, window, cx);
+            self.open_file(entry.path, behavior, window, cx);
             return;
         }
 
         if entry.is_parent {
             let previous_path = self.current_path.clone();
             self.navigate_to_directory(entry.path, Some(previous_path), window, cx);
+            if behavior == OpenBehavior::Open {
+                self.enter_dired(true, window, cx);
+            }
             return;
         }
 
-        self.open_directory(entry.path, OpenBehavior::Navigate, window, cx);
+        self.open_directory(entry.path, behavior, window, cx);
     }
 
     fn open_directory(
@@ -673,7 +893,7 @@ impl ProjectDirectoryView {
         if self.is_current_project_root(&path, cx) {
             self.navigate_to_directory(path, None, window, cx);
             if behavior == OpenBehavior::Open {
-                self.maximize(window, cx);
+                self.enter_dired(true, window, cx);
             }
             return;
         }
@@ -706,7 +926,7 @@ impl ProjectDirectoryView {
                     this.update_in(cx, |this, window, cx| {
                         this.navigate_to_directory(path, None, window, cx);
                         if behavior == OpenBehavior::Open {
-                            this.maximize(window, cx);
+                            this.enter_dired(true, window, cx);
                         }
                     })
                     .log_err();
@@ -752,13 +972,9 @@ impl ProjectDirectoryView {
                     Ok(Some(metadata)) if metadata.is_dir => {
                         this.open_directory(path, OpenBehavior::Open, window, cx);
                     }
-                    Ok(Some(_)) => {
+                    Ok(Some(_)) | Ok(None) => {
                         this.set_path_text(path.clone(), false, window, cx);
                         this.open_file(path, OpenBehavior::Open, window, cx);
-                    }
-                    Ok(None) => {
-                        this.path_error = Some(format!("No such path: {}", path.display()).into());
-                        cx.notify();
                     }
                     Err(error) => {
                         this.path_error =
@@ -926,6 +1142,18 @@ impl ProjectDirectoryView {
             .log_err();
     }
 
+    fn enter_dired(&mut self, maximize: bool, window: &mut Window, cx: &mut Context<Self>) {
+        self.mode = DirectoryViewMode::Dired;
+        self.filter_query.clear();
+        let selected_path = self.selected_entry().map(|entry| entry.path);
+        self.update_visible_entries(selected_path.as_deref());
+        self.item_focus_handle.focus(window, cx);
+        if maximize {
+            self.maximize(window, cx);
+        }
+        cx.notify();
+    }
+
     fn is_current_project_root(&self, path: &Path, cx: &App) -> bool {
         self.project
             .read(cx)
@@ -999,8 +1227,12 @@ impl ProjectDirectoryView {
                                 if event.click_count() > 1 {
                                     this.open_selected(&Confirm, window, cx);
                                 }
-                                if event.click_count() == 1 || is_directory {
+                                if this.mode == DirectoryViewMode::FindFile
+                                    || this.entry_edit.is_some()
+                                {
                                     this.path_editor.read(cx).focus_handle(cx).focus(window, cx);
+                                } else if event.click_count() == 1 || is_directory {
+                                    this.item_focus_handle.focus(window, cx);
                                 }
                             }),
                         )
@@ -1023,7 +1255,11 @@ impl Render for ProjectDirectoryView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let entry_count = self.entries.len();
         v_flex()
-            .key_context("ProjectDirectory")
+            .key_context(if self.mode == DirectoryViewMode::Dired {
+                "ProjectDirectory ProjectDirectoryDired"
+            } else {
+                "ProjectDirectory"
+            })
             .track_focus(&self.item_focus_handle)
             .size_full()
             .bg(cx.theme().colors().editor_background)
@@ -1032,6 +1268,7 @@ impl Render for ProjectDirectoryView {
             .on_action(cx.listener(Self::select_first))
             .on_action(cx.listener(Self::select_last))
             .on_action(cx.listener(Self::open_selected))
+            .on_action(cx.listener(Self::navigate_selected))
             .on_action(cx.listener(Self::go_up))
             .on_action(cx.listener(Self::confirm_path))
             .on_action(cx.listener(Self::complete_path))
@@ -1044,27 +1281,45 @@ impl Render for ProjectDirectoryView {
             .on_action(cx.listener(Self::toggle_marks))
             .on_action(cx.listener(Self::select_next_marked))
             .on_action(cx.listener(Self::select_previous_marked))
+            .on_action(cx.listener(Self::create_directory))
+            .on_action(cx.listener(Self::rename_selected))
+            .on_action(cx.listener(Self::confirm_entry_edit))
+            .on_action(cx.listener(Self::cancel_entry_edit))
             .on_action(cx.listener(Self::trash_selected))
             .on_action(cx.listener(Self::undo_trash))
             .on_action(cx.listener(Self::refresh))
-            .child(
-                h_flex()
-                    .key_context("ProjectDirectoryPath")
-                    .h_8()
-                    .px_3()
-                    .gap_2()
-                    .border_b_1()
-                    .border_color(cx.theme().colors().border)
-                    .child(
-                        Label::new("Directory")
-                            .size(LabelSize::Small)
-                            .color(Color::Muted),
-                    )
-                    .child(div().flex_1().min_w_0().child(self.path_editor.clone()))
-                    .when_some(self.path_error.clone(), |this, error| {
-                        this.child(Label::new(error).color(Color::Error))
-                    }),
-            )
+            .when(self.mode == DirectoryViewMode::FindFile, |this| {
+                this.child(
+                    h_flex()
+                        .key_context("ProjectDirectoryPath")
+                        .h_8()
+                        .px_3()
+                        .gap_2()
+                        .border_b_1()
+                        .border_color(cx.theme().colors().border)
+                        .child(
+                            Label::new("Find file")
+                                .size(LabelSize::Small)
+                                .color(Color::Muted),
+                        )
+                        .child(div().flex_1().min_w_0().child(self.path_editor.clone()))
+                        .when_some(self.path_error.clone(), |this, error| {
+                            this.child(Label::new(error).color(Color::Error))
+                        }),
+                )
+            })
+            .when(self.mode == DirectoryViewMode::Dired, |this| {
+                this.child(
+                    h_flex()
+                        .h_8()
+                        .px_3()
+                        .gap_2()
+                        .border_b_1()
+                        .border_color(cx.theme().colors().border)
+                        .child(Icon::new(IconName::Folder).size(IconSize::Small))
+                        .child(Label::new(path_text(&self.current_path, true))),
+                )
+            })
             .when(self.loading, |this| {
                 this.child(div().px_3().py_2().child(Label::new("Loading…")))
             })
@@ -1088,6 +1343,26 @@ impl Render for ProjectDirectoryView {
                 .size_full()
                 .track_scroll(&self.scroll_handle),
             )
+            .when_some(self.entry_edit.as_ref(), |this, entry_edit| {
+                this.child(
+                    h_flex()
+                        .key_context("ProjectDirectoryEntryEdit")
+                        .h_8()
+                        .px_3()
+                        .gap_2()
+                        .border_t_1()
+                        .border_color(cx.theme().colors().border)
+                        .child(
+                            Label::new(entry_edit.label())
+                                .size(LabelSize::Small)
+                                .color(Color::Muted),
+                        )
+                        .child(div().flex_1().min_w_0().child(self.path_editor.clone()))
+                        .when_some(self.path_error.clone(), |this, error| {
+                            this.child(Label::new(error).color(Color::Error))
+                        }),
+                )
+            })
             .vertical_scrollbar_for(&self.scroll_handle, window, cx)
     }
 }
@@ -1150,6 +1425,100 @@ async fn read_directory(fs: &dyn Fs, path: &Path) -> Result<Vec<DirectoryEntry>>
         entries.insert(0, DirectoryEntry::parent(parent_path.to_path_buf()));
     }
     Ok(entries)
+}
+
+async fn rename_entries(
+    fs: &dyn Fs,
+    sources: &[PathBuf],
+    destination: &Path,
+) -> Result<Vec<PathBuf>> {
+    let destinations = if let [source] = sources {
+        vec![(source.clone(), destination.to_path_buf())]
+    } else {
+        let metadata = fs
+            .metadata(destination)
+            .await
+            .with_context(|| format!("inspecting {}", destination.display()))?;
+        if !metadata.is_some_and(|metadata| metadata.is_dir) {
+            anyhow::bail!(
+                "{} must be an existing directory when moving multiple entries",
+                destination.display()
+            );
+        }
+        sources
+            .iter()
+            .map(|source| {
+                let name = source
+                    .file_name()
+                    .with_context(|| format!("{} has no file name", source.display()))?;
+                Ok((source.clone(), destination.join(name)))
+            })
+            .collect::<Result<Vec<_>>>()?
+    };
+
+    let mut unique_destinations = HashSet::new();
+    for (source, target) in &destinations {
+        if source == target {
+            continue;
+        }
+        if !unique_destinations.insert(target.clone()) {
+            anyhow::bail!("multiple entries would be moved to {}", target.display());
+        }
+        if fs.is_dir(source).await && target.starts_with(source) {
+            anyhow::bail!(
+                "cannot move {} inside itself at {}",
+                source.display(),
+                target.display()
+            );
+        }
+        if fs
+            .metadata(target)
+            .await
+            .with_context(|| format!("inspecting {}", target.display()))?
+            .is_some()
+        {
+            anyhow::bail!("{} already exists", target.display());
+        }
+    }
+
+    let mut completed: Vec<(PathBuf, PathBuf)> = Vec::new();
+    for (source, target) in &destinations {
+        if source == target {
+            continue;
+        }
+        if let Err(error) = fs
+            .rename(source, target, RenameOptions::default())
+            .await
+            .with_context(|| format!("moving {} to {}", source.display(), target.display()))
+        {
+            let mut rollback_failures = Vec::new();
+            for (completed_source, completed_target) in completed.iter().rev() {
+                if let Err(rollback_error) = fs
+                    .rename(completed_target, completed_source, RenameOptions::default())
+                    .await
+                {
+                    rollback_failures.push(format!(
+                        "{} to {}: {rollback_error:#}",
+                        completed_target.display(),
+                        completed_source.display()
+                    ));
+                }
+            }
+            if rollback_failures.is_empty() {
+                return Err(error);
+            }
+            return Err(error.context(format!(
+                "also failed to roll back:\n{}",
+                rollback_failures.join("\n")
+            )));
+        }
+        completed.push((source.clone(), target.clone()));
+    }
+
+    Ok(destinations
+        .into_iter()
+        .map(|(_, destination)| destination)
+        .collect())
 }
 
 async fn completion_candidates(
@@ -1288,6 +1657,7 @@ fn initial_directory(workspace: &Workspace, cx: &App) -> PathBuf {
 
 pub(crate) fn create(
     workspace: &Workspace,
+    mode: DirectoryViewMode,
     window: &mut Window,
     cx: &mut Context<Workspace>,
 ) -> Entity<ProjectDirectoryView> {
@@ -1295,7 +1665,17 @@ pub(crate) fn create(
     let fs = workspace.app_state().fs.clone();
     let project = workspace.project().clone();
     let workspace_handle = workspace.weak_handle();
-    cx.new(|cx| ProjectDirectoryView::new(fs, project, workspace_handle, current_path, window, cx))
+    cx.new(|cx| {
+        ProjectDirectoryView::new(
+            fs,
+            project,
+            workspace_handle,
+            current_path,
+            mode,
+            window,
+            cx,
+        )
+    })
 }
 
 #[cfg(test)]
@@ -1314,7 +1694,13 @@ mod tests {
         window: &mut Window,
         cx: &mut Context<Workspace>,
     ) {
-        crate::display_directory(workspace, ItemPlacement::ActivePane, window, cx);
+        crate::display_directory(
+            workspace,
+            ItemPlacement::ActivePane,
+            DirectoryViewMode::FindFile,
+            window,
+            cx,
+        );
     }
 
     #[gpui::test]
@@ -1535,27 +1921,11 @@ mod tests {
             directory_view.confirm_path(&ConfirmPath, window, cx);
         });
         cx.run_until_parked();
-        directory_view.update_in(cx, |directory_view, window, cx| {
+        directory_view.update_in(cx, |directory_view, window, _cx| {
             assert_eq!(directory_view.current_path, Path::new("/project/Documents"));
-            assert!(path_editor.read(cx).focus_handle(cx).is_focused(window));
+            assert_eq!(directory_view.mode, DirectoryViewMode::Dired);
+            assert!(directory_view.item_focus_handle.is_focused(window));
         });
-
-        directory_view.update_in(cx, |directory_view, window, cx| {
-            directory_view.path_backspace(&PathBackspace, window, cx);
-        });
-        cx.run_until_parked();
-        directory_view.read_with(cx, |directory_view, _| {
-            assert_eq!(directory_view.current_path, Path::new("/project"));
-            assert_eq!(directory_view.filter_query, "");
-            assert_eq!(
-                directory_view.selected_entry().map(|entry| entry.path),
-                Some(PathBuf::from("/project/Documents"))
-            );
-        });
-        assert_eq!(
-            path_editor.read_with(cx, |editor, cx| editor.text(cx)),
-            "/project/"
-        );
     }
 
     #[gpui::test]
@@ -1611,6 +1981,49 @@ mod tests {
     }
 
     #[gpui::test]
+    async fn test_find_file_opens_nonexistent_path_as_new_buffer(cx: &mut TestAppContext) {
+        crate::project_panel_tests::init_test_with_editor(cx);
+        let fs = FakeFs::new(cx.executor());
+        fs.insert_tree("/project", json!({})).await;
+        let project = Project::test(fs.clone(), ["/project".as_ref()], cx).await;
+        let window =
+            cx.add_window(|window, cx| MultiWorkspace::test_new(project.clone(), window, cx));
+        let workspace = window
+            .read_with(cx, |multi_workspace, _| multi_workspace.workspace().clone())
+            .expect("workspace should exist");
+        let cx = &mut VisualTestContext::from_window(window.into(), cx);
+
+        workspace.update_in(cx, display_in_active_pane);
+        cx.run_until_parked();
+        let directory_view = workspace
+            .read_with(cx, |workspace, cx| {
+                workspace.active_item_as::<ProjectDirectoryView>(cx)
+            })
+            .expect("directory view should be active");
+        let path_editor =
+            directory_view.read_with(cx, |directory_view, _| directory_view.path_editor.clone());
+        path_editor.update_in(cx, |editor, window, cx| {
+            editor.set_text("/project/new.rs", window, cx);
+        });
+        cx.run_until_parked();
+        directory_view.update_in(cx, |directory_view, window, cx| {
+            directory_view.confirm_path(&ConfirmPath, window, cx);
+        });
+        cx.run_until_parked();
+
+        assert!(!fs.is_file(Path::new("/project/new.rs")).await);
+        workspace.read_with(cx, |workspace, cx| {
+            assert_eq!(
+                workspace
+                    .active_item(cx)
+                    .and_then(|item| item.project_path(cx))
+                    .map(|path| path.path),
+                Some(Arc::from(rel_path("new.rs")))
+            );
+        });
+    }
+
+    #[gpui::test]
     async fn test_open_directory_in_split(cx: &mut TestAppContext) {
         crate::project_panel_tests::init_test(cx);
         let fs = FakeFs::new(cx.executor());
@@ -1642,11 +2055,29 @@ mod tests {
             })
             .expect("directory view should be active");
         directory_view.update_in(cx, |directory_view, window, cx| {
-            directory_view.open_selected(&Confirm, window, cx);
+            assert_eq!(directory_view.mode, DirectoryViewMode::FindFile);
+            assert!(
+                directory_view
+                    .path_editor
+                    .read(cx)
+                    .focus_handle(cx)
+                    .is_focused(window)
+            );
+        });
+        directory_view.update_in(cx, |directory_view, window, cx| {
+            directory_view.navigate_selected(&NavigateSelected, window, cx);
         });
         cx.run_until_parked();
-        directory_view.read_with(cx, |directory_view, _| {
+        directory_view.update_in(cx, |directory_view, window, cx| {
             assert_eq!(directory_view.current_path, Path::new("/project/src"));
+            assert_eq!(directory_view.mode, DirectoryViewMode::FindFile);
+            assert!(
+                directory_view
+                    .path_editor
+                    .read(cx)
+                    .focus_handle(cx)
+                    .is_focused(window)
+            );
         });
         workspace.read_with(cx, |workspace, _| {
             assert!(!workspace.is_pane_maximized());
@@ -1663,6 +2094,7 @@ mod tests {
 
         directory_view.read_with(cx, |directory_view, _| {
             assert_eq!(directory_view.current_path, Path::new("/project/src"));
+            assert_eq!(directory_view.mode, DirectoryViewMode::Dired);
         });
         workspace.read_with(cx, |workspace, _| {
             assert!(workspace.is_pane_maximized());
@@ -1691,6 +2123,7 @@ mod tests {
             })
             .expect("directory view should be active");
         directory_view.update_in(cx, |directory_view, window, cx| {
+            assert_eq!(directory_view.mode, DirectoryViewMode::FindFile);
             directory_view.confirm_path(&ConfirmPath, window, cx);
         });
         cx.run_until_parked();
@@ -1998,6 +2431,181 @@ mod tests {
                 directory_view.selected_entry().map(|entry| entry.path),
                 Some(PathBuf::from("/project/alpha"))
             );
+        });
+    }
+
+    #[gpui::test]
+    async fn test_create_directory_uses_dired_entry_input(cx: &mut TestAppContext) {
+        crate::project_panel_tests::init_test_with_editor(cx);
+        let fs = FakeFs::new(cx.executor());
+        fs.insert_tree("/project", json!({ "existing-directory": {} }))
+            .await;
+        let project = Project::test(fs.clone(), ["/project".as_ref()], cx).await;
+        let window =
+            cx.add_window(|window, cx| MultiWorkspace::test_new(project.clone(), window, cx));
+        let workspace = window
+            .read_with(cx, |multi_workspace, _| multi_workspace.workspace().clone())
+            .expect("workspace should exist");
+        let cx = &mut VisualTestContext::from_window(window.into(), cx);
+
+        workspace.update_in(cx, display_in_active_pane);
+        cx.run_until_parked();
+        let directory_view = workspace
+            .read_with(cx, |workspace, cx| {
+                workspace.active_item_as::<ProjectDirectoryView>(cx)
+            })
+            .expect("directory view should be active");
+        let path_editor =
+            directory_view.read_with(cx, |directory_view, _| directory_view.path_editor.clone());
+
+        directory_view.update_in(cx, |directory_view, window, cx| {
+            directory_view.enter_dired(false, window, cx);
+            directory_view.create_directory(&CreateDirectory, window, cx);
+        });
+        cx.run_until_parked();
+        directory_view.update_in(cx, |directory_view, window, cx| {
+            assert_eq!(directory_view.mode, DirectoryViewMode::Dired);
+            assert_eq!(directory_view.path_editor.read(cx).text(cx), "/project/");
+            assert!(
+                directory_view
+                    .path_editor
+                    .read(cx)
+                    .focus_handle(cx)
+                    .is_focused(window)
+            );
+        });
+
+        path_editor.update_in(cx, |editor, window, cx| {
+            editor.set_text("/project/created-directory", window, cx);
+        });
+        directory_view.update_in(cx, |directory_view, window, cx| {
+            directory_view.confirm_entry_edit(&ConfirmEntryEdit, window, cx);
+        });
+        cx.run_until_parked();
+
+        assert!(fs.is_dir(Path::new("/project/created-directory")).await);
+        directory_view.read_with(cx, |directory_view, _| {
+            assert_eq!(directory_view.entry_edit, None);
+            assert_eq!(
+                directory_view.selected_entry().map(|entry| entry.path),
+                Some(PathBuf::from("/project/created-directory"))
+            );
+        });
+
+        directory_view.update_in(cx, |directory_view, window, cx| {
+            directory_view.create_directory(&CreateDirectory, window, cx);
+        });
+        path_editor.update_in(cx, |editor, window, cx| {
+            editor.set_text("/project/existing-directory", window, cx);
+        });
+        directory_view.update_in(cx, |directory_view, window, cx| {
+            directory_view.confirm_entry_edit(&ConfirmEntryEdit, window, cx);
+        });
+        cx.run_until_parked();
+
+        directory_view.read_with(cx, |directory_view, _| {
+            assert_eq!(
+                directory_view.entry_edit,
+                Some(EntryEditKind::CreateDirectory)
+            );
+            assert!(directory_view.path_error.is_some());
+        });
+        directory_view.update_in(cx, |directory_view, window, cx| {
+            directory_view.cancel_entry_edit(&CancelEntryEdit, window, cx);
+        });
+        directory_view.update_in(cx, |directory_view, window, cx| {
+            assert_eq!(directory_view.entry_edit, None);
+            assert_eq!(directory_view.path_editor.read(cx).text(cx), "/project/");
+            assert!(directory_view.item_focus_handle.is_focused(window));
+        });
+    }
+
+    #[gpui::test]
+    async fn test_rename_moves_selected_or_marked_entries(cx: &mut TestAppContext) {
+        crate::project_panel_tests::init_test_with_editor(cx);
+        let fs = FakeFs::new(cx.executor());
+        fs.insert_tree(
+            "/project",
+            json!({
+                "alpha.txt": "alpha",
+                "beta.txt": "beta",
+                "destination": {}
+            }),
+        )
+        .await;
+        let project = Project::test(fs.clone(), ["/project".as_ref()], cx).await;
+        let window =
+            cx.add_window(|window, cx| MultiWorkspace::test_new(project.clone(), window, cx));
+        let workspace = window
+            .read_with(cx, |multi_workspace, _| multi_workspace.workspace().clone())
+            .expect("workspace should exist");
+        let cx = &mut VisualTestContext::from_window(window.into(), cx);
+
+        workspace.update_in(cx, display_in_active_pane);
+        cx.run_until_parked();
+        let directory_view = workspace
+            .read_with(cx, |workspace, cx| {
+                workspace.active_item_as::<ProjectDirectoryView>(cx)
+            })
+            .expect("directory view should be active");
+        let path_editor =
+            directory_view.read_with(cx, |directory_view, _| directory_view.path_editor.clone());
+
+        directory_view.update_in(cx, |directory_view, window, cx| {
+            directory_view.enter_dired(false, window, cx);
+            let alpha_index = directory_view
+                .entries
+                .iter()
+                .position(|entry| entry.path == Path::new("/project/alpha.txt"))
+                .expect("alpha file should be listed");
+            directory_view.select_index(alpha_index, cx);
+            directory_view.rename_selected(&RenameSelected, window, cx);
+        });
+        assert_eq!(
+            path_editor.read_with(cx, |editor, cx| editor.text(cx)),
+            "alpha.txt"
+        );
+        path_editor.update_in(cx, |editor, window, cx| {
+            editor.set_text("renamed.txt", window, cx);
+        });
+        directory_view.update_in(cx, |directory_view, window, cx| {
+            directory_view.confirm_entry_edit(&ConfirmEntryEdit, window, cx);
+        });
+        cx.run_until_parked();
+
+        assert!(!fs.is_file(Path::new("/project/alpha.txt")).await);
+        assert!(fs.is_file(Path::new("/project/renamed.txt")).await);
+        directory_view.read_with(cx, |directory_view, _| {
+            assert_eq!(
+                directory_view.selected_entry().map(|entry| entry.path),
+                Some(PathBuf::from("/project/renamed.txt"))
+            );
+        });
+
+        directory_view.update_in(cx, |directory_view, window, cx| {
+            directory_view.marked_paths.extend([
+                PathBuf::from("/project/beta.txt"),
+                PathBuf::from("/project/renamed.txt"),
+            ]);
+            directory_view.rename_selected(&RenameSelected, window, cx);
+        });
+        assert_eq!(path_editor.read_with(cx, |editor, cx| editor.text(cx)), "");
+        path_editor.update_in(cx, |editor, window, cx| {
+            editor.set_text("/project/destination", window, cx);
+        });
+        directory_view.update_in(cx, |directory_view, window, cx| {
+            directory_view.confirm_entry_edit(&ConfirmEntryEdit, window, cx);
+        });
+        cx.run_until_parked();
+
+        assert!(fs.is_file(Path::new("/project/destination/beta.txt")).await);
+        assert!(
+            fs.is_file(Path::new("/project/destination/renamed.txt"))
+                .await
+        );
+        directory_view.read_with(cx, |directory_view, _| {
+            assert!(directory_view.marked_paths.is_empty());
+            assert_eq!(directory_view.entry_edit, None);
         });
     }
 

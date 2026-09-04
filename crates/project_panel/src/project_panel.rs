@@ -4,8 +4,9 @@ mod undo;
 mod utils;
 
 pub use directory_view::{
-    ClearMarks, CompletePath, ConfirmPath, GoUp, HistoryBack, HistoryForward, MarkSelected,
-    PathBackspace, ProjectDirectoryView, Refresh, SelectNextMarked, SelectPreviousMarked,
+    CancelEntryEdit, ClearMarks, CompletePath, ConfirmEntryEdit, ConfirmPath, CreateDirectory,
+    GoUp, HistoryBack, HistoryForward, MarkSelected, NavigateSelected, PathBackspace,
+    ProjectDirectoryView, Refresh, RenameSelected, SelectNextMarked, SelectPreviousMarked,
     ToggleMarks, TrashSelected, UndoTrash, UnmarkSelected,
 };
 
@@ -472,17 +473,24 @@ impl FoldedAncestors {
 fn display_directory(
     workspace: &mut Workspace,
     placement: ItemPlacement,
+    mode: directory_view::DirectoryViewMode,
     window: &mut Window,
     cx: &mut Context<Workspace>,
 ) {
-    let directory_view = directory_view::create(workspace, window, cx);
+    let directory_view = directory_view::create(workspace, mode, window, cx);
     workspace.display_item(Box::new(directory_view), placement, window, cx);
 }
 
 pub fn init(cx: &mut App) {
     cx.observe_new(|workspace: &mut Workspace, _, _| {
         workspace.register_action(|workspace, _: &OpenDirectory, window, cx| {
-            display_directory(workspace, ItemPlacement::ActivePane, window, cx);
+            display_directory(
+                workspace,
+                ItemPlacement::ActivePane,
+                directory_view::DirectoryViewMode::FindFile,
+                window,
+                cx,
+            );
         });
         workspace.register_action(|workspace, _: &OpenDirectorySplit, window, cx| {
             let direction = SplitDirection::horizontal(cx);
@@ -492,6 +500,7 @@ pub fn init(cx: &mut App) {
                     direction,
                     ratio: 0.4,
                 },
+                directory_view::DirectoryViewMode::FindFile,
                 window,
                 cx,
             );
