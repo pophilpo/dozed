@@ -4,8 +4,7 @@ mod undo;
 mod utils;
 
 pub use directory_view::{
-    CancelSearch, ConfirmSearch, GoUp, ProjectDirectoryView, Refresh, SearchNext, SearchPrevious,
-    StartSearch,
+    CompletePath, ConfirmPath, GoUp, PathBackspace, ProjectDirectoryView, Refresh,
 };
 
 use anyhow::{Context as _, Result};

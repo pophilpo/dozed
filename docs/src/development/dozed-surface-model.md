@@ -36,11 +36,19 @@ shape. Every surface has one role:
   project root, falls back to the home directory in an empty workspace, and can
   navigate to the filesystem root. Entering a different Git repository opens
   it as a project workspace; ordinary directories remain in the same browser.
-  Directory search is incremental: accepting keeps the matched selection while
-  cancelling restores the selection from before the search. Vim next- and
-  previous-match commands continue the accepted search with wraparound.
+  The directory path is the buffer's sole text input and retains keyboard
+  focus. Typing in it incrementally filters the displayed entries, with an
+  empty path query showing the full directory. Tab completes filesystem entries
+  and cycles matching candidates without changing the filter; only typed edits
+  change which entries are visible. Backspace moves to the parent directory
+  when the handle contains a resolved path; while it contains a partial edit,
+  Backspace deletes a character normally. Control-H/J/K/L navigate up, select,
+  and traverse entries without moving focus out of the path. Enter opens the
+  selected directory or file as the primary, maximized center-pane content.
+  Escape closes the browser while its always-focused path input is active.
   The presentation stays line-oriented and compact, with an explicit parent
-  entry and lightweight file metadata. Refresh rereads the filesystem while
+  entry, slash-terminated directory names, and lightweight file metadata.
+  Refresh rereads the filesystem while
   preserving the selected path when it still exists. Its launchers can ask the
   workspace to display the same buffer in the active pane or as a horizontal
   split. The compact launcher requests forty percent of the pane being split;

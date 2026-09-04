@@ -8255,6 +8255,38 @@ impl Workspace {
         cx.notify();
     }
 
+    pub fn maximize_item_pane(
+        &mut self,
+        item: &dyn ItemHandle,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(target_pane) = self.pane_for(item) else {
+            return;
+        };
+        if self
+            .maximized_pane
+            .as_ref()
+            .and_then(WeakEntity::upgrade)
+            .as_ref()
+            == Some(&target_pane)
+        {
+            return;
+        }
+
+        if self.zoomed.is_some() {
+            target_pane.update(cx, |pane, cx| pane.set_zoomed(false, cx));
+            self.zoomed = None;
+            self.zoomed_position = None;
+            cx.emit(Event::ZoomChanged);
+        }
+        self.maximized_pane = Some(target_pane.downgrade());
+        if !target_pane.read(cx).has_focus(window, cx) {
+            window.focus(&target_pane.focus_handle(cx), cx);
+        }
+        cx.notify();
+    }
+
     pub fn is_pane_maximized(&self) -> bool {
         self.maximized_pane.is_some()
     }
