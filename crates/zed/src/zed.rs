@@ -5794,6 +5794,8 @@ mod tests {
             (&["alt-m", "t"][..], "project_browser::ToggleMarks"),
             (&["alt-m", "n"][..], "project_browser::SelectNextMarked"),
             (&["alt-m", "p"][..], "project_browser::SelectPreviousMarked"),
+            (&["alt-m", "x"][..], "project_browser::TrashSelected"),
+            (&["alt-m", "z"][..], "project_browser::UndoTrash"),
         ] {
             assert_eq!(
                 vim_bindings_for(keystrokes, &project_directory_path, cx).first(),

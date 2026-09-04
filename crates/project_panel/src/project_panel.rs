@@ -6,7 +6,7 @@ mod utils;
 pub use directory_view::{
     ClearMarks, CompletePath, ConfirmPath, GoUp, HistoryBack, HistoryForward, MarkSelected,
     PathBackspace, ProjectDirectoryView, Refresh, SelectNextMarked, SelectPreviousMarked,
-    ToggleMarks, UnmarkSelected,
+    ToggleMarks, TrashSelected, UndoTrash, UnmarkSelected,
 };
 
 use anyhow::{Context as _, Result};

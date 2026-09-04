@@ -68,7 +68,11 @@ shape. Every surface has one role:
   Alt-B and Alt-F move backward and forward through visited directories while
   restoring the selection remembered in each directory. Marks are stored by
   path, persist across directory history, and use the Alt-M prefix because
-  unmodified text remains path-filter input.
+  unmodified text remains path-filter input. File operations use marked entries
+  from the current directory when any exist, including marks hidden by the
+  active filter; otherwise they use the current entry. Alt-M X moves those
+  targets to the system trash, never permanently deletes them, and Alt-M Z
+  restores the most recent batch.
   The presentation stays line-oriented and compact, with an explicit parent
   entry, slash-terminated directory names, and lightweight file metadata.
   Refresh rereads the filesystem while

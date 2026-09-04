@@ -11,12 +11,12 @@ use editor::{
     Editor, EditorEvent,
     actions::{Backspace, MoveToEndOfLine},
 };
-use fs::Fs;
+use fs::{Fs, RemoveOptions, TrashId};
 use futures::StreamExt as _;
 use gpui::{
-    AnyElement, App, Context, Entity, EventEmitter, FocusHandle, Focusable, IntoElement, Render,
-    ScrollStrategy, SharedString, Subscription, Task, UniformListScrollHandle, WeakEntity, Window,
-    actions, uniform_list,
+    AnyElement, App, Context, Entity, EventEmitter, FocusHandle, Focusable, IntoElement,
+    PromptLevel, Render, ScrollStrategy, SharedString, Subscription, Task, UniformListScrollHandle,
+    WeakEntity, Window, actions, uniform_list,
 };
 use menu::{Confirm, SelectFirst, SelectLast, SelectNext, SelectPrevious};
 use project::{Project, ProjectPath};
@@ -48,6 +48,8 @@ actions!(
         ToggleMarks,
         SelectNextMarked,
         SelectPreviousMarked,
+        TrashSelected,
+        UndoTrash,
         Refresh
     ]
 );
@@ -147,11 +149,15 @@ pub struct ProjectDirectoryView {
     history: Vec<DirectoryHistoryEntry>,
     history_index: usize,
     marked_paths: HashSet<PathBuf>,
+    trash_history: Vec<Vec<TrashId>>,
+    operation_in_progress: bool,
+    operation_error: Option<SharedString>,
     item_focus_handle: FocusHandle,
     scroll_handle: UniformListScrollHandle,
     _load_task: Task<()>,
     _open_task: Task<()>,
     _path_task: Task<()>,
+    _operation_task: Task<()>,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -197,11 +203,15 @@ impl ProjectDirectoryView {
             }],
             history_index: 0,
             marked_paths: HashSet::new(),
+            trash_history: Vec::new(),
+            operation_in_progress: false,
+            operation_error: None,
             item_focus_handle: item_focus_handle.clone(),
             scroll_handle: UniformListScrollHandle::new(),
             _load_task: Task::ready(()),
             _open_task: Task::ready(()),
             _path_task: Task::ready(()),
+            _operation_task: Task::ready(()),
             _subscriptions: Vec::new(),
         };
         this._subscriptions
@@ -382,6 +392,133 @@ impl ProjectDirectoryView {
             return;
         };
         self.select_index(index, cx);
+    }
+
+    fn operation_targets(&self) -> Vec<PathBuf> {
+        let marked_entries = self
+            .all_entries
+            .iter()
+            .filter(|entry| !entry.is_parent && self.marked_paths.contains(&entry.path))
+            .map(|entry| entry.path.clone())
+            .collect::<Vec<_>>();
+        if !marked_entries.is_empty() {
+            return marked_entries;
+        }
+
+        self.selected_entry()
+            .filter(|entry| !entry.is_parent)
+            .map(|entry| vec![entry.path])
+            .unwrap_or_default()
+    }
+
+    fn trash_selected(&mut self, _: &TrashSelected, window: &mut Window, cx: &mut Context<Self>) {
+        if self.operation_in_progress {
+            return;
+        }
+        let targets = self.operation_targets();
+        if targets.is_empty() {
+            return;
+        }
+
+        let prompt = if let [target] = targets.as_slice() {
+            format!("Move {} to the trash?", target.display())
+        } else {
+            format!("Move {} marked entries to the trash?", targets.len())
+        };
+        let answer = window.prompt(PromptLevel::Info, &prompt, None, &["Trash", "Cancel"], cx);
+        let fs = self.fs.clone();
+        self.operation_in_progress = true;
+        self.operation_error = None;
+        cx.notify();
+        self._operation_task = cx.spawn_in(window, async move |this, cx| {
+            if answer.await != Ok(0) {
+                this.update(cx, |this, cx| {
+                    this.operation_in_progress = false;
+                    cx.notify();
+                })
+                .log_err();
+                return;
+            }
+
+            let mut trashed_entries = Vec::new();
+            let mut trashed_paths = Vec::new();
+            let mut failures = Vec::new();
+            for path in targets {
+                match fs
+                    .trash(
+                        &path,
+                        RemoveOptions {
+                            recursive: true,
+                            ignore_if_not_exists: false,
+                        },
+                    )
+                    .await
+                {
+                    Ok(trash_id) => {
+                        trashed_entries.push(trash_id);
+                        trashed_paths.push(path);
+                    }
+                    Err(error) => failures.push(format!("{}: {error:#}", path.display())),
+                }
+            }
+
+            this.update_in(cx, |this, window, cx| {
+                this.operation_in_progress = false;
+                for path in &trashed_paths {
+                    this.marked_paths.remove(path);
+                }
+                if !trashed_entries.is_empty() {
+                    this.trash_history.push(trashed_entries);
+                }
+                this.operation_error = (!failures.is_empty())
+                    .then(|| format!("Failed to trash:\n{}", failures.join("\n")).into());
+                this.load_directory(this.current_path.clone(), None, window, cx);
+            })
+            .log_err();
+        });
+    }
+
+    fn undo_trash(&mut self, _: &UndoTrash, window: &mut Window, cx: &mut Context<Self>) {
+        if self.operation_in_progress {
+            return;
+        }
+        let Some(trashed_entries) = self.trash_history.pop() else {
+            return;
+        };
+
+        let fs = self.fs.clone();
+        self.operation_in_progress = true;
+        self.operation_error = None;
+        cx.notify();
+        self._operation_task = cx.spawn_in(window, async move |this, cx| {
+            let mut restored_paths = Vec::new();
+            let mut failed_entries = Vec::new();
+            let mut failures = Vec::new();
+            for trash_id in trashed_entries {
+                match fs.restore(trash_id).await {
+                    Ok(path) => restored_paths.push(path),
+                    Err(error) => {
+                        failed_entries.push(trash_id);
+                        failures.push(format!("{error:#}"));
+                    }
+                }
+            }
+
+            this.update_in(cx, |this, window, cx| {
+                this.operation_in_progress = false;
+                if !failed_entries.is_empty() {
+                    this.trash_history.push(failed_entries);
+                }
+                this.operation_error = (!failures.is_empty()).then(|| {
+                    format!("Failed to restore from trash:\n{}", failures.join("\n")).into()
+                });
+                let path_to_select = restored_paths
+                    .into_iter()
+                    .find(|path| path.parent() == Some(this.current_path.as_path()));
+                this.load_directory(this.current_path.clone(), path_to_select, window, cx);
+            })
+            .log_err();
+        });
     }
 
     fn update_visible_entries(&mut self, preferred_path: Option<&Path>) {
@@ -907,6 +1044,8 @@ impl Render for ProjectDirectoryView {
             .on_action(cx.listener(Self::toggle_marks))
             .on_action(cx.listener(Self::select_next_marked))
             .on_action(cx.listener(Self::select_previous_marked))
+            .on_action(cx.listener(Self::trash_selected))
+            .on_action(cx.listener(Self::undo_trash))
             .on_action(cx.listener(Self::refresh))
             .child(
                 h_flex()
@@ -931,6 +1070,14 @@ impl Render for ProjectDirectoryView {
             })
             .when_some(self.load_error.clone(), |this, error| {
                 this.child(div().px_3().py_2().child(Label::new(error)))
+            })
+            .when_some(self.operation_error.clone(), |this, error| {
+                this.child(
+                    div()
+                        .px_3()
+                        .py_2()
+                        .child(Label::new(error).color(Color::Error)),
+                )
             })
             .child(
                 uniform_list(
@@ -1737,9 +1884,120 @@ mod tests {
 
         directory_view.update_in(cx, |directory_view, window, cx| {
             directory_view.clear_marks(&ClearMarks, window, cx);
+            directory_view.select_index(0, cx);
         });
         directory_view.read_with(cx, |directory_view, _| {
             assert!(directory_view.marked_paths.is_empty());
+            assert!(directory_view.operation_targets().is_empty());
+        });
+
+        directory_view.update_in(cx, |directory_view, _window, cx| {
+            let notes_index = directory_view
+                .entries
+                .iter()
+                .position(|entry| entry.path == Path::new("/project/notes.txt"))
+                .expect("notes file should be listed");
+            directory_view.select_index(notes_index, cx);
+        });
+        directory_view.read_with(cx, |directory_view, _| {
+            assert_eq!(
+                directory_view.operation_targets(),
+                [PathBuf::from("/project/notes.txt")]
+            );
+        });
+    }
+
+    #[gpui::test]
+    async fn test_trash_uses_current_directory_marks_and_can_be_undone(cx: &mut TestAppContext) {
+        crate::project_panel_tests::init_test_with_editor(cx);
+        let fs = FakeFs::new(cx.executor());
+        fs.insert_tree(
+            "/project",
+            json!({
+                "alpha": { "nested.txt": "alpha" },
+                "beta": {},
+                "notes.txt": "notes"
+            }),
+        )
+        .await;
+        let project = Project::test(fs.clone(), ["/project".as_ref()], cx).await;
+        let window =
+            cx.add_window(|window, cx| MultiWorkspace::test_new(project.clone(), window, cx));
+        let workspace = window
+            .read_with(cx, |multi_workspace, _| multi_workspace.workspace().clone())
+            .expect("workspace should exist");
+        let cx = &mut VisualTestContext::from_window(window.into(), cx);
+
+        workspace.update_in(cx, display_in_active_pane);
+        cx.run_until_parked();
+        let directory_view = workspace
+            .read_with(cx, |workspace, cx| {
+                workspace.active_item_as::<ProjectDirectoryView>(cx)
+            })
+            .expect("directory view should be active");
+
+        directory_view.update_in(cx, |directory_view, window, cx| {
+            directory_view.mark_selected(&MarkSelected, window, cx);
+            directory_view.mark_selected(&MarkSelected, window, cx);
+            directory_view.filter_query = "notes".into();
+            directory_view.update_visible_entries(None);
+        });
+        directory_view.read_with(cx, |directory_view, _| {
+            assert_eq!(
+                directory_view.operation_targets(),
+                [
+                    PathBuf::from("/project/alpha"),
+                    PathBuf::from("/project/beta")
+                ]
+            );
+            assert_eq!(
+                directory_view.selected_entry().map(|entry| entry.path),
+                Some(PathBuf::from("/project/notes.txt"))
+            );
+        });
+
+        directory_view.update_in(cx, |directory_view, window, cx| {
+            directory_view.trash_selected(&TrashSelected, window, cx);
+        });
+        assert!(cx.has_pending_prompt());
+        cx.simulate_prompt_answer("Trash");
+        cx.run_until_parked();
+
+        assert_eq!(
+            fs.trashed_paths().into_iter().collect::<HashSet<_>>(),
+            HashSet::from([
+                PathBuf::from("/project/alpha"),
+                PathBuf::from("/project/beta")
+            ])
+        );
+        directory_view.read_with(cx, |directory_view, _| {
+            assert!(directory_view.marked_paths.is_empty());
+            assert_eq!(directory_view.trash_history.len(), 1);
+            assert_eq!(
+                directory_view
+                    .all_entries
+                    .iter()
+                    .filter(|entry| !entry.is_parent)
+                    .map(|entry| entry.path.clone())
+                    .collect::<Vec<_>>(),
+                [PathBuf::from("/project/notes.txt")]
+            );
+        });
+
+        directory_view.update_in(cx, |directory_view, window, cx| {
+            directory_view.undo_trash(&UndoTrash, window, cx);
+        });
+        cx.run_until_parked();
+
+        assert!(fs.trashed_paths().is_empty());
+        assert!(fs.is_dir(Path::new("/project/alpha")).await);
+        assert!(fs.is_dir(Path::new("/project/beta")).await);
+        directory_view.read_with(cx, |directory_view, _| {
+            assert!(directory_view.trash_history.is_empty());
+            assert_eq!(
+                directory_view.selected_entry().map(|entry| entry.path),
+                Some(PathBuf::from("/project/alpha"))
+            );
         });
     }
 
