@@ -5786,6 +5786,14 @@ mod tests {
             (&["ctrl-k"][..], "menu::SelectPrevious"),
             (&["ctrl-h"][..], "project_browser::GoUp"),
             (&["ctrl-l"][..], "menu::Confirm"),
+            (&["alt-b"][..], "project_browser::HistoryBack"),
+            (&["alt-f"][..], "project_browser::HistoryForward"),
+            (&["alt-m", "m"][..], "project_browser::MarkSelected"),
+            (&["alt-m", "u"][..], "project_browser::UnmarkSelected"),
+            (&["alt-m", "shift-u"][..], "project_browser::ClearMarks"),
+            (&["alt-m", "t"][..], "project_browser::ToggleMarks"),
+            (&["alt-m", "n"][..], "project_browser::SelectNextMarked"),
+            (&["alt-m", "p"][..], "project_browser::SelectPreviousMarked"),
         ] {
             assert_eq!(
                 vim_bindings_for(keystrokes, &project_directory_path, cx).first(),

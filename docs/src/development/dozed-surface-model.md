@@ -14,6 +14,25 @@ shape. Every surface has one role:
 - **Transient**: A short interaction such as a picker, prompt, or workspace
   selector. Confirming or cancelling dismisses it.
 
+## Dired parity boundary {#dozed-dired-parity}
+
+- GNU Dired supplies the durable semantics: a directory projection, cursor
+  selection, persistent marks, and operations over marked entries or the
+  current entry.
+- Doom configures safer defaults, project/workspace lifecycle, omitted files,
+  and Evil commands. Dirvish remains a presentation and session layer for
+  history, attributes, sorting, previews, quick access, and discoverable menus.
+- Doom's always-editable path prompt comes from `find-file` plus Vertico, not
+  Dired itself. Dozed deliberately combines that prompt with a Dired-like
+  directory buffer, so command keys that conflict with path text need prefixes.
+- Dozed ports those behaviors onto typed filesystem state and the shared
+  buffer/window model. It does not reproduce Dired's mutable text buffer,
+  `ls` parsing, overlays, or dedicated Emacs windows.
+- The port order is navigation and session history; marks and safe batch
+  operations; create, rename, trash, and undo; sorting, omission, and help;
+  then previews and subtree views. History uses Dirvish's backward/forward
+  semantics and discards the forward branch after new navigation.
+
 ## Decisions {#dozed-surface-decisions}
 
 - The container owns the role. Pane items additionally declare whether they are
@@ -46,6 +65,10 @@ shape. Every surface has one role:
   and traverse entries without moving focus out of the path. Enter opens the
   selected directory or file as the primary, maximized center-pane content.
   Escape closes the browser while its always-focused path input is active.
+  Alt-B and Alt-F move backward and forward through visited directories while
+  restoring the selection remembered in each directory. Marks are stored by
+  path, persist across directory history, and use the Alt-M prefix because
+  unmodified text remains path-filter input.
   The presentation stays line-oriented and compact, with an explicit parent
   entry, slash-terminated directory names, and lightweight file metadata.
   Refresh rereads the filesystem while

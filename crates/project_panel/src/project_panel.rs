@@ -4,7 +4,9 @@ mod undo;
 mod utils;
 
 pub use directory_view::{
-    CompletePath, ConfirmPath, GoUp, PathBackspace, ProjectDirectoryView, Refresh,
+    ClearMarks, CompletePath, ConfirmPath, GoUp, HistoryBack, HistoryForward, MarkSelected,
+    PathBackspace, ProjectDirectoryView, Refresh, SelectNextMarked, SelectPreviousMarked,
+    ToggleMarks, UnmarkSelected,
 };
 
 use anyhow::{Context as _, Result};
