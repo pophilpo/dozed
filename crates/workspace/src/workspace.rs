@@ -408,6 +408,15 @@ pub struct MoveItemToPaneInDirection {
 #[serde(deny_unknown_fields)]
 pub struct NewFileSplit(pub SplitDirection);
 
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum ItemPlacement {
+    ActivePane,
+    Split {
+        direction: SplitDirection,
+        ratio: f32,
+    },
+}
+
 fn default_right() -> SplitDirection {
     SplitDirection::Right
 }
@@ -4734,6 +4743,27 @@ impl Workspace {
         self.add_item(new_pane, item, None, true, true, window, cx);
     }
 
+    pub fn display_item(
+        &mut self,
+        item: Box<dyn ItemHandle>,
+        placement: ItemPlacement,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        match placement {
+            ItemPlacement::ActivePane => {
+                self.add_item_to_active_pane(item, None, true, window, cx);
+            }
+            ItemPlacement::Split { direction, ratio } => {
+                let new_pane = self.add_pane(window, cx);
+                self.center
+                    .split_with_ratio(&self.active_pane, &new_pane, direction, ratio, cx);
+                self.add_item(new_pane, item, None, true, true, window, cx);
+                cx.notify();
+            }
+        }
+    }
+
     pub fn open_abs_path(
         &mut self,
         abs_path: PathBuf,
@@ -8218,6 +8248,38 @@ impl Workspace {
             }
         }
 
+        self.maximized_pane = Some(target_pane.downgrade());
+        if !target_pane.read(cx).has_focus(window, cx) {
+            window.focus(&target_pane.focus_handle(cx), cx);
+        }
+        cx.notify();
+    }
+
+    pub fn maximize_item_pane(
+        &mut self,
+        item: &dyn ItemHandle,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(target_pane) = self.pane_for(item) else {
+            return;
+        };
+        if self
+            .maximized_pane
+            .as_ref()
+            .and_then(WeakEntity::upgrade)
+            .as_ref()
+            == Some(&target_pane)
+        {
+            return;
+        }
+
+        if self.zoomed.is_some() {
+            target_pane.update(cx, |pane, cx| pane.set_zoomed(false, cx));
+            self.zoomed = None;
+            self.zoomed_position = None;
+            cx.emit(Event::ZoomChanged);
+        }
         self.maximized_pane = Some(target_pane.downgrade());
         if !target_pane.read(cx).has_focus(window, cx) {
             window.focus(&target_pane.focus_handle(cx), cx);
@@ -13585,6 +13647,39 @@ mod tests {
             let (top, nested) = nested_axis(workspace);
             assert_eq!(*top.flexes.lock(), vec![1.0; top.members.len()]);
             assert_eq!(*nested.flexes.lock(), vec![1.0; nested.members.len()]);
+        });
+    }
+
+    #[gpui::test]
+    async fn test_display_item_in_split_with_ratio(cx: &mut TestAppContext) {
+        init_test(cx);
+        let fs = FakeFs::new(cx.executor());
+        let project = Project::test(fs, [], cx).await;
+        let (workspace, cx) =
+            cx.add_window_view(|window, cx| Workspace::test_new(project, window, cx));
+
+        workspace.update_in(cx, |workspace, window, cx| {
+            let first_item = cx.new(TestItem::new);
+            workspace.add_item_to_active_pane(Box::new(first_item), None, true, window, cx);
+            let split_item = cx.new(TestItem::new);
+            workspace.display_item(
+                Box::new(split_item),
+                ItemPlacement::Split {
+                    direction: SplitDirection::Down,
+                    ratio: 0.4,
+                },
+                window,
+                cx,
+            );
+        });
+
+        workspace.read_with(cx, |workspace, _| {
+            let Member::Axis(axis) = &workspace.center.root else {
+                panic!("expected a split pane axis");
+            };
+            assert_eq!(axis.axis, Axis::Vertical);
+            assert_eq!(axis.members.len(), 2);
+            assert_eq!(axis.flexes.lock().as_slice(), &[1.2, 0.8]);
         });
     }
 

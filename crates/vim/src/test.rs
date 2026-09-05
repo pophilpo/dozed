@@ -3097,6 +3097,18 @@ async fn test_deactivate(cx: &mut gpui::TestAppContext) {
     });
 }
 
+#[gpui::test]
+async fn test_default_cursor_is_block_in_all_modes(cx: &mut gpui::TestAppContext) {
+    let mut cx = VimTestContext::new(cx, true).await;
+    cx.set_state("ˇexample", Mode::Normal);
+    for keys in [
+        "i", "escape", "shift-r", "escape", "v", "escape", "d", "escape",
+    ] {
+        cx.simulate_keystrokes(keys);
+        cx.update_editor(|editor, _, _| assert_eq!(editor.cursor_shape(), CursorShape::Block));
+    }
+}
+
 // workspace::SendKeystrokes should pass literal keystrokes without triggering vim motions.
 // When sending `" _ x`, the `_` should select the blackhole register, not trigger
 // vim::StartOfLineDownward.

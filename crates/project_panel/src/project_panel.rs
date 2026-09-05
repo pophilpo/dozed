@@ -1,6 +1,15 @@
+mod directory_view;
 pub mod project_panel_settings;
 mod undo;
 mod utils;
+
+pub use directory_view::{
+    CancelEntryEdit, ClearMarks, CompletePath, ConfirmEntryEdit, ConfirmInput, ConfirmPath,
+    CopySelected, CreateDirectory, FlagForDeletion, GoUp, HistoryBack, HistoryForward,
+    MarkSelected, NavigateSelected, OpenProject, PathBackspace, ProjectDirectoryView, Refresh,
+    RenameSelected, SelectNextMarked, SelectPreviousMarked, ToggleMarks, TrashFlagged,
+    TrashSelected, UndoTrash, UnmarkSelected,
+};
 
 use anyhow::{Context as _, Result};
 use client::{ErrorCode, ErrorExt};
@@ -72,8 +81,8 @@ use util::{
     rel_path::{RelPath, RelPathBuf},
 };
 use workspace::{
-    DraggedSelection, OpenInTerminal, OpenMode, OpenOptions, OpenVisible, PreviewTabsSettings,
-    SelectedEntry, SplitDirection, Workspace, WorkspaceSettings,
+    DraggedSelection, ItemPlacement, OpenInTerminal, OpenMode, OpenOptions, OpenVisible,
+    PreviewTabsSettings, SelectedEntry, SplitDirection, Workspace, WorkspaceSettings,
     dock::{DockPosition, Panel, PanelEvent},
     focus_follows_mouse::FocusFollowsMouse as _,
     notifications::{DetachAndPromptErr, NotifyResultExt, NotifyTaskExt},
@@ -414,6 +423,11 @@ actions!(
     ]
 );
 
+actions!(
+    project_browser,
+    [FindFile, OpenDirectory, OpenDirectorySplit]
+);
+
 #[derive(Clone, Debug, Default)]
 struct FoldedAncestors {
     current_ancestor_depth: usize,
@@ -460,8 +474,44 @@ impl FoldedAncestors {
     }
 }
 
+fn display_directory(
+    workspace: &mut Workspace,
+    placement: ItemPlacement,
+    mode: directory_view::DirectoryViewMode,
+    window: &mut Window,
+    cx: &mut Context<Workspace>,
+) {
+    let directory_view = directory_view::create(workspace, mode, window, cx);
+    workspace.display_item(Box::new(directory_view), placement, window, cx);
+}
+
 pub fn init(cx: &mut App) {
     cx.observe_new(|workspace: &mut Workspace, _, _| {
+        workspace.register_action(|workspace, _: &FindFile, window, cx| {
+            directory_view::find_file(workspace, window, cx);
+        });
+        workspace.register_action(|workspace, _: &OpenDirectory, window, cx| {
+            display_directory(
+                workspace,
+                ItemPlacement::ActivePane,
+                directory_view::DirectoryViewMode::Dired,
+                window,
+                cx,
+            );
+        });
+        workspace.register_action(|workspace, _: &OpenDirectorySplit, window, cx| {
+            let direction = SplitDirection::horizontal(cx);
+            display_directory(
+                workspace,
+                ItemPlacement::Split {
+                    direction,
+                    ratio: 0.4,
+                },
+                directory_view::DirectoryViewMode::FindFile,
+                window,
+                cx,
+            );
+        });
         workspace.register_action(|workspace, _: &ToggleFocus, window, cx| {
             workspace.toggle_panel_focus::<ProjectPanel>(window, cx);
         });

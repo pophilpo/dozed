@@ -93,6 +93,54 @@ impl PaneGroup {
         self.mark_positions(cx);
     }
 
+    pub fn split_with_ratio(
+        &mut self,
+        old_pane: &Entity<Pane>,
+        new_pane: &Entity<Pane>,
+        direction: SplitDirection,
+        new_pane_ratio: f32,
+        cx: &mut App,
+    ) {
+        let new_pane_ratio = new_pane_ratio.clamp(0.05, 0.95);
+        let found = match &mut self.root {
+            Member::Pane(pane) => {
+                if pane == old_pane {
+                    self.root = Member::new_axis_with_ratio(
+                        old_pane.clone(),
+                        new_pane.clone(),
+                        direction,
+                        new_pane_ratio,
+                    );
+                    true
+                } else {
+                    false
+                }
+            }
+            Member::Axis(axis) => {
+                axis.split_with_ratio(old_pane, new_pane, direction, new_pane_ratio)
+            }
+        };
+
+        if !found {
+            let first_pane = self.root.first_pane();
+            match &mut self.root {
+                Member::Pane(_) => {
+                    self.root = Member::new_axis_with_ratio(
+                        first_pane,
+                        new_pane.clone(),
+                        direction,
+                        new_pane_ratio,
+                    );
+                }
+                Member::Axis(axis) => {
+                    axis.split_with_ratio(&first_pane, new_pane, direction, new_pane_ratio);
+                }
+            }
+        }
+
+        self.mark_positions(cx);
+    }
+
     pub fn bounding_box_for_pane(&self, pane: &Entity<Pane>) -> Option<Bounds<Pixels>> {
         match &self.root {
             Member::Pane(_) => None,
@@ -515,6 +563,35 @@ impl Member {
         Member::Axis(PaneAxis::new(axis, members))
     }
 
+    fn new_axis_with_ratio(
+        old_pane: Entity<Pane>,
+        new_pane: Entity<Pane>,
+        direction: SplitDirection,
+        new_pane_ratio: f32,
+    ) -> Self {
+        use Axis::*;
+        use SplitDirection::*;
+
+        let axis = match direction {
+            Up | Down => Vertical,
+            Left | Right => Horizontal,
+        };
+        let old_pane_flex = 2. * (1. - new_pane_ratio);
+        let new_pane_flex = 2. * new_pane_ratio;
+        let (members, flexes) = match direction {
+            Up | Left => (
+                vec![Member::Pane(new_pane), Member::Pane(old_pane)],
+                vec![new_pane_flex, old_pane_flex],
+            ),
+            Down | Right => (
+                vec![Member::Pane(old_pane), Member::Pane(new_pane)],
+                vec![old_pane_flex, new_pane_flex],
+            ),
+        };
+
+        Member::Axis(PaneAxis::load(axis, members, Some(flexes)))
+    }
+
     fn first_pane(&self) -> Entity<Pane> {
         match self {
             Member::Axis(axis) => axis.members[0].first_pane(),
@@ -698,9 +775,75 @@ impl PaneAxis {
         false
     }
 
+    fn split_with_ratio(
+        &mut self,
+        old_pane: &Entity<Pane>,
+        new_pane: &Entity<Pane>,
+        direction: SplitDirection,
+        new_pane_ratio: f32,
+    ) -> bool {
+        for (mut index, member) in self.members.iter_mut().enumerate() {
+            match member {
+                Member::Axis(axis) => {
+                    if axis.split_with_ratio(old_pane, new_pane, direction, new_pane_ratio) {
+                        return true;
+                    }
+                }
+                Member::Pane(pane) => {
+                    if pane == old_pane {
+                        if direction.axis() == self.axis {
+                            let old_index = index;
+                            if direction.increasing() {
+                                index += 1;
+                            }
+                            self.insert_pane_with_ratio(old_index, index, new_pane, new_pane_ratio);
+                        } else {
+                            *member = Member::new_axis_with_ratio(
+                                old_pane.clone(),
+                                new_pane.clone(),
+                                direction,
+                                new_pane_ratio,
+                            );
+                        }
+                        return true;
+                    }
+                }
+            }
+        }
+        false
+    }
+
     fn insert_pane(&mut self, idx: usize, new_pane: &Entity<Pane>) {
         self.members.insert(idx, Member::Pane(new_pane.clone()));
         *self.flexes.lock() = vec![1.; self.members.len()];
+    }
+
+    fn insert_pane_with_ratio(
+        &mut self,
+        old_index: usize,
+        new_index: usize,
+        new_pane: &Entity<Pane>,
+        new_pane_ratio: f32,
+    ) {
+        let Some(old_pane_flex) = self.flexes.lock().get(old_index).copied() else {
+            return;
+        };
+        let old_member_count = self.members.len() as f32;
+        let new_member_count = old_member_count + 1.;
+        let mut flexes = self.flexes.lock();
+        for flex in flexes.iter_mut() {
+            *flex *= new_member_count / old_member_count;
+        }
+
+        let scaled_old_pane_flex = old_pane_flex * new_member_count / old_member_count;
+        let new_pane_flex = scaled_old_pane_flex * new_pane_ratio;
+        if let Some(old_pane_flex) = flexes.get_mut(old_index) {
+            *old_pane_flex = scaled_old_pane_flex - new_pane_flex;
+        }
+        let new_index = new_index.min(flexes.len());
+        flexes.insert(new_index, new_pane_flex);
+        self.members
+            .insert(new_index, Member::Pane(new_pane.clone()));
     }
 
     fn find_pane_at_border(&self, direction: SplitDirection) -> Option<&Entity<Pane>> {
