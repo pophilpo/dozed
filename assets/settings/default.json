@@ -266,8 +266,8 @@
   //  4. A box drawn around the following character
   //     "hollow"
   //
-  // Default: "bar"
-  "cursor_shape": "bar",
+  // Default: "block"
+  "cursor_shape": "block",
   // Determines when the mouse cursor should be hidden in response to keyboard
   // input.
   //
@@ -2671,7 +2671,7 @@
     // The shape can be one of the following: "block", "bar", "underline", "hollow".
     "cursor_shape": {
       "normal": "block",
-      "replace": "underline",
+      "replace": "block",
       "visual": "block",
       // Set to "inherit" to use the editor's cursor_shape.
       "insert": "inherit",

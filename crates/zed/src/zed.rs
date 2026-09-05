@@ -5627,6 +5627,12 @@ mod tests {
             "Pane SpecialBuffer",
             "ProjectDirectory ProjectDirectoryDired",
         ];
+        let project_directory_prompt = [
+            "Workspace",
+            "ProjectDirectory ProjectDirectoryPrompt TransientSurface",
+            "ProjectDirectoryPath",
+            "Editor mode=single_line",
+        ];
         let project_directory_entry_edit = [
             "Workspace",
             "Pane SpecialBuffer",
@@ -5648,6 +5654,26 @@ mod tests {
             "Editor VimControl vim_mode=normal menu",
         ];
 
+        for context in [&normal_editor[..], &special_view[..], &empty_pane[..]] {
+            assert_eq!(
+                vim_bindings_for(&["space", "."], context, cx).first(),
+                Some(&"project_browser::FindFile".to_string())
+            );
+        }
+        for (keys, action) in [
+            (&["escape"][..], "menu::Cancel"),
+            (&["ctrl-g"][..], "menu::Cancel"),
+            (&["enter"][..], "project_browser::ConfirmPath"),
+            (&["alt-enter"][..], "project_browser::ConfirmInput"),
+            (&["tab"][..], "project_browser::CompletePath"),
+            (&["ctrl-j"][..], "menu::SelectNext"),
+            (&["ctrl-k"][..], "menu::SelectPrevious"),
+        ] {
+            assert_eq!(
+                vim_bindings_for(keys, &project_directory_prompt, cx).first(),
+                Some(&action.to_string())
+            );
+        }
         assert_eq!(
             vim_bindings_for(&["q"], &normal_editor, cx).first(),
             Some(&"vim::ToggleRecord".to_string())
@@ -5779,15 +5805,15 @@ mod tests {
         );
         assert_eq!(
             vim_bindings_for(&["-"], &normal_editor, cx).first(),
-            Some(&"project_browser::OpenDirectorySplit".to_string())
+            Some(&"project_browser::OpenDirectory".to_string())
         );
         assert_eq!(
             vim_bindings_for(&["-"], &special_view, cx).first(),
-            Some(&"project_browser::OpenDirectorySplit".to_string())
+            Some(&"project_browser::OpenDirectory".to_string())
         );
         assert_eq!(
             vim_bindings_for(&["-"], &empty_pane, cx).first(),
-            Some(&"project_browser::OpenDirectorySplit".to_string())
+            Some(&"project_browser::OpenDirectory".to_string())
         );
         for (keystrokes, expected_action) in [
             (&["escape"][..], "pane::CloseActiveItem"),
@@ -5821,6 +5847,7 @@ mod tests {
             (&["enter"][..], "menu::Confirm"),
             (&["l"][..], "menu::Confirm"),
             (&["h"][..], "project_browser::GoUp"),
+            (&["ctrl-enter"][..], "project_browser::OpenProject"),
             (&["alt-b"][..], "project_browser::HistoryBack"),
             (&["alt-f"][..], "project_browser::HistoryForward"),
             (&["m"][..], "project_browser::MarkSelected"),
@@ -5831,7 +5858,11 @@ mod tests {
             (&["[", "m"][..], "project_browser::SelectPreviousMarked"),
             (&["+"][..], "project_browser::CreateDirectory"),
             (&["shift-r"][..], "project_browser::RenameSelected"),
-            (&["x"][..], "project_browser::TrashSelected"),
+            (&["shift-c"][..], "project_browser::CopySelected"),
+            (&["y", "y"][..], "project_browser::CopySelected"),
+            (&["d"][..], "project_browser::FlagForDeletion"),
+            (&["x"][..], "project_browser::TrashFlagged"),
+            (&["shift-d"][..], "project_browser::TrashSelected"),
             (&["ctrl-_"][..], "project_browser::UndoTrash"),
             (&["r"][..], "project_browser::Refresh"),
         ] {
@@ -5852,6 +5883,12 @@ mod tests {
             vim_bindings_for(&["escape"], &project_directory_entry_edit, cx).first(),
             Some(&"project_browser::CancelEntryEdit".to_string())
         );
+        for context in [&project_directory_dired[..], &project_directory_prompt[..]] {
+            assert_eq!(
+                vim_bindings_for(&["ctrl-l"], context, cx).first(),
+                Some(&"project_browser::NavigateSelected".to_string())
+            );
+        }
         assert_eq!(
             vim_bindings_for(&["enter"], &project_directory_entry_edit, cx).first(),
             Some(&"project_browser::ConfirmEntryEdit".to_string())

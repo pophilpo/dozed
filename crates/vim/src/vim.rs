@@ -1413,8 +1413,7 @@ impl Vim {
                         | Operator::RecordRegister
                         | Operator::ReplayRegister => CursorShape::Block,
 
-                        // All other operators -> Underline cursor
-                        _ => CursorShape::Underline,
+                        _ => cursor_shape.normal,
                     }
                 } else {
                     cursor_shape.normal

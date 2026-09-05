@@ -30,8 +30,34 @@ shape. Every surface has one role:
   `ls` parsing, overlays, or dedicated Emacs windows.
 - The port order is navigation and session history; marks and safe batch
   operations; create, rename, trash, and undo; sorting, omission, and help;
-  then previews and subtree views. History uses Dirvish's backward/forward
-  semantics and discards the forward branch after new navigation.
+  then previews and subtree views. History provides backward/forward navigation
+  inspired by Dirvish, with a browser-style forward branch that is discarded
+  after new navigation. Dirvish itself retains a list of visited buffers.
+
+The behavior references are GNU Emacs's
+[dired.el](https://github.com/emacs-mirror/emacs/blob/master/lisp/dired.el)
+(`dired-get-marked-files`, `dired-up-directory`, and deletion flags),
+[dired-aux.el](https://github.com/emacs-mirror/emacs/blob/master/lisp/dired-aux.el)
+(`dired-do-copy` and `dired-do-rename`), and
+[Dirvish](https://github.com/alexluigit/dirvish/blob/main/dirvish.el)
+(`dirvish--find-entry` and `dirvish-reuse-session`). The port also follows the
+installed Doom Dired module and the fork owner's Doom configuration: jump to
+Dired from the active file, retain directory state when opening files, and
+show Dired when opening a new project.
+Find-file interactions are checked against the installed Doom session and
+[Vertico's directory extension](https://github.com/minad/vertico/blob/main/extensions/vertico-directory.el):
+directory completion, component deletion, explicit input acceptance, and
+Doom's `+vertico/enter-or-preview` command.
+
+This is behavioral alignment for the core navigation workflow, not full package
+parity. Orderless completion, Dired omission rules and writable listings, and
+Dirvish's attribute menus, subtree views, and rich preview system are not ported.
+The owner's requested Tab cycling and prefix-first fuzzy ranking are deliberate
+customizations: Doom uses `vertico-next`/`vertico-previous` for cycling and
+`vertico-insert` for Tab, while its file completion styles are Orderless and
+partial completion. Dozed uses its existing Nucleo matcher, prioritizing filename
+prefixes over interior matches (for example, `Documents` before `.docker` for
+`Doc`).
 
 ## Decisions {#dozed-surface-decisions}
 
@@ -53,21 +79,47 @@ shape. Every surface has one role:
 - Directory browsing is a center-pane special buffer backed by the filesystem,
   not bounded by the workspace's worktrees. It starts from the active file or
   project root, falls back to the home directory in an empty workspace, and can
-  navigate to the filesystem root. Entering a different Git repository opens
-  it as a project workspace; ordinary directories remain in the same browser.
-  Find-file keeps keyboard focus in its path input. Typing incrementally filters
-  candidates; Tab completes and cycles candidates without changing the filter.
-  Backspace moves to the parent for a resolved path and edits partial input
-  normally. Control-H/J/K/L navigate without leaving the input. Confirming an
-  existing directory replaces the prompt with a maximized Dired listing;
-  confirming a nonexistent path opens an unsaved file buffer at that path.
-  The compact `-` launcher opens find-file in a forty-percent split. Confirming
-  any ordinary directory replaces that navigator with Dired and maximizes its
-  pane.
+  navigate to the filesystem root. {#kb project_browser::OpenDirectory} jumps
+  directly to Dired in the current pane and selects the active file. Returning
+  reuses that pane's Dired buffer for the same folder, preserving its marks.
+  Entering a different Git repository stays in the browser.
+  {#kb project_browser::OpenProject} explicitly opens the selected folder (or
+  the current folder when a file is selected) as a project. A new project opens
+  in Dired; existing project buffers remain available.
+  {#kb project_browser::FindFile} opens a transient bottom path prompt, reducing
+  the editor area without adding a pane. The typed directory starts selected;
+  Return opens it as Dired in the current pane without maximizing. Typing filters
+  candidates. Control-J/K select candidates or the input; Tab fills and cycles
+  matching paths while retaining the original search and directory listing.
+  Control-L explicitly enters a selected directory. Backspace deletes a directory
+  component only immediately after a slash and otherwise edits a character.
+  Control-H removes the component before the cursor. Control-L enters the
+  selected directory or previews a file behind the prompt, retaining input
+  focus. Escape or Control-G cancels and restores the original buffer, removing
+  unmodified preview tabs created by the prompt. Return accepts the selection;
+  Alt-Return accepts the typed input explicitly, including nonexistent paths
+  which open as unsaved file buffers.
+  {#action project_browser::OpenDirectorySplit} remains available for find-file
+  in a forty-percent split with its legacy cycling completion. Confirming a
+  folder replaces that navigator with
+  Dired and maximizes its pane. Opening a file from an existing Dired listing
+  preserves the pane layout.
+  In Dired, Control-L previews a selected file in the adjacent pane on the right,
+  creating that pane only when needed and retaining focus in Dired. This follows
+  GNU Dired's `dired-display-file` (`display-buffer` plus `find-file-noselect`),
+  rather than requiring an active Vertico prompt. Repeated previews reuse that
+  pane and its temporary preview tab.
   Dired has no persistent text input and therefore uses direct normal-mode
-  commands. `h`/`l` navigate directories, `j`/`k` select, `+` prompts for a
-  directory to create, `R` renames or moves, and `x` moves targets to the
-  system trash.
+  commands. {#kb project_browser::GoUp} and {#kb menu::Confirm} navigate,
+  {#kb menu::SelectNext} and {#kb menu::SelectPrevious} select,
+  {#kb project_browser::CreateDirectory} prompts for a folder to create,
+  {#kb project_browser::RenameSelected} renames or moves, and
+  {#kb project_browser::CopySelected} copies files and folders recursively.
+  {#kb project_browser::FlagForDeletion} flags entries with `D`;
+  {#kb project_browser::TrashFlagged} confirms and trashes only those flags.
+  {#kb project_browser::TrashSelected} directly confirms and trashes the marked
+  or current entries. Unmarking clears both marks and deletion flags; toggling
+  marks leaves deletion flags alone.
   Entry prompts are temporary and Escape returns focus to the Dired listing.
   All of these bindings are scoped to the Dired or entry-edit key context and
   do not participate in find-file or normal editor key resolution.
@@ -77,12 +129,26 @@ shape. Every surface has one role:
   from the current directory when any exist, including marks hidden by a
   transient filter; otherwise they use the current entry. Batch moves validate
   every destination before making changes and attempt to roll back completed
-  moves if a later move fails. Trash operations never permanently delete and
+  moves if a later move fails. A single entry can also be moved into an existing
+  folder. Copying preserves symbolic links without following them, including
+  dangling links and directory loops. Existing destinations are rejected, and
+  folders cannot be copied or moved inside themselves through a symlink alias.
+  Copy failures report that earlier copies may remain.
+  Trash operations never permanently delete and
   the most recent batch can be restored.
   The presentation stays line-oriented and compact, with an explicit parent
   entry, slash-terminated directory names, and lightweight file metadata.
-  Refresh rereads the filesystem while
-  preserving the selected path when it still exists. Its launchers can ask the
+  Filenames and path inputs use the buffer's monospaced font at UI text size.
+  The selected Dired filename has a block cursor as well as a row highlight;
+  dots and letters occupy the same cell. Path inputs use a compact line height
+  instead of inheriting the source editor's line spacing.
+  Text inputs and Vim normal, insert, replace, and pending-operator modes use
+  block cursors by default; explicit user cursor settings remain supported.
+  Folders sort first, with natural number ordering within each group.
+  Refresh and returning focus to Dired reread the filesystem while preserving
+  the selected path when it still exists. Marks for vanished entries are cleared.
+  Entry prompts block navigation and refresh until accepted or cancelled.
+  Its launchers can ask the
   workspace to display the same buffer in the active pane or as a horizontal
   split. The compact launcher requests forty percent of the pane being split;
   sizing, maximize, and restore remain workspace behavior.

@@ -4,10 +4,11 @@ mod undo;
 mod utils;
 
 pub use directory_view::{
-    CancelEntryEdit, ClearMarks, CompletePath, ConfirmEntryEdit, ConfirmPath, CreateDirectory,
-    GoUp, HistoryBack, HistoryForward, MarkSelected, NavigateSelected, PathBackspace,
-    ProjectDirectoryView, Refresh, RenameSelected, SelectNextMarked, SelectPreviousMarked,
-    ToggleMarks, TrashSelected, UndoTrash, UnmarkSelected,
+    CancelEntryEdit, ClearMarks, CompletePath, ConfirmEntryEdit, ConfirmInput, ConfirmPath,
+    CopySelected, CreateDirectory, FlagForDeletion, GoUp, HistoryBack, HistoryForward,
+    MarkSelected, NavigateSelected, OpenProject, PathBackspace, ProjectDirectoryView, Refresh,
+    RenameSelected, SelectNextMarked, SelectPreviousMarked, ToggleMarks, TrashFlagged,
+    TrashSelected, UndoTrash, UnmarkSelected,
 };
 
 use anyhow::{Context as _, Result};
@@ -422,7 +423,10 @@ actions!(
     ]
 );
 
-actions!(project_browser, [OpenDirectory, OpenDirectorySplit]);
+actions!(
+    project_browser,
+    [FindFile, OpenDirectory, OpenDirectorySplit]
+);
 
 #[derive(Clone, Debug, Default)]
 struct FoldedAncestors {
@@ -483,11 +487,14 @@ fn display_directory(
 
 pub fn init(cx: &mut App) {
     cx.observe_new(|workspace: &mut Workspace, _, _| {
+        workspace.register_action(|workspace, _: &FindFile, window, cx| {
+            directory_view::find_file(workspace, window, cx);
+        });
         workspace.register_action(|workspace, _: &OpenDirectory, window, cx| {
             display_directory(
                 workspace,
                 ItemPlacement::ActivePane,
-                directory_view::DirectoryViewMode::FindFile,
+                directory_view::DirectoryViewMode::Dired,
                 window,
                 cx,
             );
